@@ -1,0 +1,7 @@
+{
+  "name": "万物穿戴",
+  "description": "一个服务于电商卖家的AI图片处理工具，提供商品图片智能生成、编辑等功能。本功能为万物穿戴。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

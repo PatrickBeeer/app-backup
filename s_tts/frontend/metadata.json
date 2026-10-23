@@ -1,0 +1,5 @@
+{
+  "name": "S TTS Workbench",
+  "description": "Standalone app for title generation, script planning, and text-to-audio workflow.",
+  "requestFramePermissions": []
+}

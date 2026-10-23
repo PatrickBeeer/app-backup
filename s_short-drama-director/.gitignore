@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.DS_Store
+backend/.env
+backend/dist
+frontend/dist
+playwright-report
+test-results

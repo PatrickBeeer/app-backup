@@ -1,0 +1,11 @@
+{
+  "name": "Seedance视频复刻v2",
+  "description": "基于 CPRT 多模态视频模型的动作复刻工作台（v2）：上传参考视频与参考图片，复刻人物动作并替换人物形象，支持 AI 换声/换语言（ASR 识别原台词 + 自动翻译 + 豆包语音合成/声音复刻对口型）。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "video-generation",
+    "multimodal-reference",
+    "real-person-mode",
+    "voice-replacement"
+  ]
+}

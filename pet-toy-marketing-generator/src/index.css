@@ -1,0 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Noto Sans SC', 'DM Sans', sans-serif;
+  background: radial-gradient(circle at top left, #f7f2ff 0%, #eef7ff 52%, #f6fbf9 100%);
+  color: #0f172a;
+}

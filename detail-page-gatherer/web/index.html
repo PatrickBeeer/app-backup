@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>淘宝详情页竞品分析</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark">淘</div>
+          <div>
+            <strong>详情页分析台</strong>
+            <span>Taobao page planner</span>
+          </div>
+        </div>
+
+        <nav class="steps">
+          <a class="active" href="#task">1. 创建任务</a>
+          <a href="#browser">2. 浏览器模式</a>
+          <a href="#competitors">3. 竞品来源</a>
+          <a href="#result">4. 报告结果</a>
+        </nav>
+
+        <div class="state-card">
+          <span class="label">运行环境</span>
+          <strong id="stateText">检测中</strong>
+          <p>推荐使用“连接我的 Chrome”，先在自己的浏览器里完成淘宝登录。</p>
+          <code>start_chrome_for_taobao.bat</code>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1>淘宝主图与详情页竞品抓取</h1>
+            <p>输入客户链接和品类关键词，抓取 Top 3 竞品并生成策划报告草稿。</p>
+          </div>
+          <button class="ghost" id="clearBtn" type="button">清空</button>
+        </header>
+
+        <section class="workspace">
+          <form class="panel form-panel" id="taskForm">
+            <div class="panel-head" id="task">
+              <h2>任务信息</h2>
+              <span>必填项越完整，报告越可用</span>
+            </div>
+
+            <label class="field wide">
+              <span>客户产品链接</span>
+              <input name="client_product_url" placeholder="https://item.taobao.com/item.htm?id=..." required />
+            </label>
+
+            <div class="grid two">
+              <label class="field">
+                <span>行业 / 品类</span>
+                <input name="industry" placeholder="例如：宠物用品" required />
+              </label>
+              <label class="field">
+                <span>搜索关键词</span>
+                <input name="category_keyword" placeholder="例如：猫窝" required />
+              </label>
+            </div>
+
+            <div class="grid three">
+              <label class="field">
+                <span>品牌名</span>
+                <input name="brand_name" placeholder="客户品牌" />
+              </label>
+              <label class="field">
+                <span>目标市场</span>
+                <input name="target_market" value="中国大陆" />
+              </label>
+              <label class="field">
+                <span>价格区间</span>
+                <input name="price_range" placeholder="50-150 RMB" />
+              </label>
+            </div>
+
+            <div class="panel-head sub" id="browser">
+              <h2>浏览器模式</h2>
+              <span>淘宝建议使用自己的 Chrome，降低异常登录概率</span>
+            </div>
+
+            <div class="mode-group">
+              <label class="mode active">
+                <input type="radio" name="browser_mode" value="chrome" checked />
+                <strong>连接我的 Chrome</strong>
+                <span>使用你已登录的 Chrome 页面，推荐</span>
+              </label>
+              <label class="mode">
+                <input type="radio" name="browser_mode" value="managed" />
+                <strong>托管 Chromium</strong>
+                <span>使用保存的登录态，适合测试</span>
+              </label>
+            </div>
+
+            <label class="field wide">
+              <span>Chrome 调试地址</span>
+              <input name="cdp_url" value="http://127.0.0.1:9222" />
+            </label>
+
+            <div class="panel-head sub" id="competitors">
+              <h2>竞品链接</h2>
+              <span>可留空，系统会按关键词搜索 Top 3</span>
+            </div>
+
+            <label class="field wide">
+              <span>竞品 1</span>
+              <input name="competitor_1_url" placeholder="可选：手动指定竞品链接" />
+            </label>
+            <label class="field wide">
+              <span>竞品 2</span>
+              <input name="competitor_2_url" placeholder="可选：手动指定竞品链接" />
+            </label>
+            <label class="field wide">
+              <span>竞品 3</span>
+              <input name="competitor_3_url" placeholder="可选：手动指定竞品链接" />
+            </label>
+
+            <label class="field wide">
+              <span>备注</span>
+              <textarea name="notes" rows="4" placeholder="例如：关注年轻女性用户、偏高端视觉、重点对比收纳和材质卖点"></textarea>
+            </label>
+
+            <div class="actions">
+              <label class="check">
+                <input type="checkbox" name="headless" />
+                <span>托管 Chromium 后台运行</span>
+              </label>
+              <button class="primary" id="runBtn" type="submit">开始抓取分析</button>
+            </div>
+          </form>
+
+          <aside class="result-column" id="result">
+            <section class="panel status-panel">
+              <div class="panel-head">
+                <h2>运行状态</h2>
+                <span id="jobId">等待任务</span>
+              </div>
+              <div class="meter">
+                <div id="meterBar"></div>
+              </div>
+              <pre id="logBox">填写左侧表单后开始任务。</pre>
+            </section>
+
+            <section class="panel report-panel">
+              <div class="panel-head">
+                <h2>报告预览</h2>
+                <a id="reportLink" href="#" target="_blank" hidden>打开文件</a>
+              </div>
+              <article id="reportPreview" class="report-empty">
+                抓取完成后，这里会显示 Markdown 报告草稿。
+              </article>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

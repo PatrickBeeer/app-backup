@@ -1,0 +1,48 @@
+# ---- Dependencies ----
+node_modules/
+.pnp
+.pnp.js
+
+# ---- Build output ----
+dist/
+build/
+out/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# ---- Runtime / generated data ----
+.run/
+output/
+logs/
+storage/
+uploads/
+live-commerce-replica/data/projects/
+*.pid
+*.sqlite-wal
+*.sqlite-shm
+
+# ---- Compiled binaries (source is committed alongside) ----
+s_tts/bailian_proxy/s_tts_bailian_proxy
+
+# ---- Python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ---- Caches / misc tooling ----
+.cache/
+coverage/
+.DS_Store
+Thumbs.db
+
+# ---- Secrets (KEEP .env.example templates) ----
+.env
+.env.*
+!.env.example
+s_tts/config/keys.json
+video-clone-seedance-v2/*apiKey*.csv

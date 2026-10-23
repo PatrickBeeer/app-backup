@@ -1,0 +1,8 @@
+
+{
+  "name": "AI 智能去水印",
+  "description": "一款基于先进 AI 图像编辑能力的智能应用，能够智能识别并完美祛除图片中的水印。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

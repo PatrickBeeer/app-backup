@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) * .6);
+  --radius-md: calc(var(--radius) * .8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+:root {
+  --background: oklch(.955 .012 75);
+  --foreground: oklch(.25 .012 55);
+  --card: oklch(.985 .009 75);
+  --card-foreground: oklch(.25 .012 55);
+  --popover: oklch(.985 .009 75);
+  --popover-foreground: oklch(.25 .012 55);
+  --primary: oklch(.51 .12 37);
+  --primary-foreground: oklch(.99 .005 70);
+  --secondary: oklch(.91 .02 72);
+  --secondary-foreground: oklch(.32 .02 45);
+  --muted: oklch(.92 .012 70);
+  --muted-foreground: oklch(.51 .015 55);
+  --accent: oklch(.9 .034 55);
+  --accent-foreground: oklch(.4 .07 38);
+  --destructive: oklch(.57 .22 27);
+  --border: oklch(.83 .012 65);
+  --input: oklch(.81 .014 65);
+  --ring: oklch(.58 .11 38);
+  --radius: .5rem;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #f2efe9; color: #272421; }
+body { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+.font-serif { font-family: Georgia, "Noto Serif SC", "Songti SC", serif; }
+.section-kicker { color: #a5543c; font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+.field-label { color: #39342f; font-size: 12px; font-weight: 650; letter-spacing: .02em; }
+.field-hint { margin-top: 4px; color: #8a8178; font-size: 11px; }
+.status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: #4c9a6a; box-shadow: 0 0 0 3px rgb(76 154 106 / .12); }
+.upload-tile {
+  border: 1px dashed #b4aba2;
+  background-color: rgb(255 255 255 / .5);
+  background-image: radial-gradient(rgb(165 84 60 / .08) .7px, transparent .7px);
+  background-size: 10px 10px;
+  transition: border-color .2s ease, background-color .2s ease;
+}
+.upload-tile:hover { border-color: #a5543c; background-color: rgb(255 255 255 / .8); }
+.choice-chip, .ratio-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid rgb(39 36 33 / .12); background: rgb(255 255 255 / .55); color: #665f58;
+  transition: .18s ease;
+}
+.choice-chip { min-height: 30px; padding: 5px 10px; border-radius: 999px; font-size: 11px; }
+.choice-chip:hover, .ratio-chip:hover { border-color: rgb(165 84 60 / .55); color: #8f4430; }
+.choice-chip.is-active, .ratio-chip.is-active { border-color: #a5543c; background: #a5543c; color: white; }
+.ratio-chip { height: 34px; padding: 0 9px; border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.ratio-shape { display: inline-block; height: 13px; max-width: 20px; min-width: 6px; border: 1px solid currentColor; }
+.accent-range { height: 3px; appearance: none; border-radius: 999px; background: linear-gradient(to right, #a5543c 0 72%, #d8d0c7 72% 100%); }
+.accent-range::-webkit-slider-thumb { width: 15px; height: 15px; appearance: none; border: 3px solid #f8f5ef; border-radius: 50%; background: #a5543c; box-shadow: 0 0 0 1px #a5543c; }
+.canvas-shell {
+  position: relative; min-height: 460px; overflow: hidden;
+  border: 1px solid rgb(39 36 33 / .12); background: #e7e2d9;
+  box-shadow: 0 24px 60px rgb(57 48 40 / .08);
+}
+.canvas-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgb(39 36 33 / .04) 1px, transparent 1px), linear-gradient(90deg, rgb(39 36 33 / .04) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+@media (min-width: 1280px) { .canvas-shell { min-height: min(620px, calc(100vh - 255px)); } }
+@media (max-width: 640px) { .canvas-shell { min-height: 330px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

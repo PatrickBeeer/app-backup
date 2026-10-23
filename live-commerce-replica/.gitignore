@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.run/
+logs/
+data/
+coverage/
+*.log
+*.tmp
+Thumbs.db
+.DS_Store

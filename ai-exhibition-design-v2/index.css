@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-glass-white: rgba(255, 255, 255, 0.6);
+  --color-glass-border: rgba(255, 255, 255, 0.4);
+}
+
+@layer base {
+  body {
+    @apply bg-[#f0f2f5] text-[#000] font-sans antialiased;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/60 backdrop-blur-xl border border-white/40 shadow-[0_20px_50px_rgba(0,0,0,0.05)] rounded-[2rem];
+  }
+
+  .btn-primary {
+    @apply bg-black text-white px-8 py-4 rounded-2xl font-bold transition-all duration-300 hover:scale-[1.02] hover:shadow-xl active:scale-[0.98] disabled:bg-gray-300 disabled:scale-100 disabled:shadow-none;
+  }
+
+  .input-glass {
+    @apply bg-white/40 border-none rounded-2xl p-4 focus:bg-white/60 focus:ring-0 outline-none transition-all duration-300;
+  }
+}
+
+.shadow-soft-blue {
+  box-shadow: 0 20px 40px -15px rgba(0, 102, 255, 0.05);
+}

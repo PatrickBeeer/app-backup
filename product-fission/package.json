@@ -1,0 +1,18 @@
+{
+  "name": "product-fission-standalone",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "商品裂变实验室 - UnityShop standalone app",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}

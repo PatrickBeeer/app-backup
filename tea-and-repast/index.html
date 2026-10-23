@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101210" />
+    <title>器物光场 · 餐饮具 AI 主图工作台</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <p class="eyebrow">ADVANCED AI COMMERCIAL ENGINE</p>
+            <h1>家用碗茶具主图生成</h1>
+          </div>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar left-panel">
+          <div class="panel-heading">
+            <div><span class="section-index">01</span><h2>参考素材</h2></div>
+            <span class="count-chip" id="uploadCount">0 / 3</span>
+          </div>
+          <p class="panel-intro">上传器物参考图，光场会锁定它的颜色、釉面与器型。</p>
+
+          <label class="upload-zone" id="uploadZone" for="fileInput" tabindex="0">
+            <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+            <span class="upload-orbit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 15.5v2A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-2" /></svg></span>
+            <strong>拖入或选择参考图</strong>
+            <span>PNG / JPG / WEBP · 单张不超过 10MB</span>
+          </label>
+          <p class="error-message" id="uploadError" role="alert"></p>
+          <div class="reference-list" id="referenceList" aria-live="polite"></div>
+
+          <div class="settings-block detected-category" id="detectedCategoryBlock">
+            <div class="field-label"><span>AI 识别类目</span><span class="field-hint">AUTO DETECT</span></div>
+            <div class="detected-category-value"><span class="detect-signal"></span><strong id="detectedCategory">等待上传参考图</strong><span class="mono">AI</span></div>
+          </div>
+
+          <div class="settings-block prompt-block">
+            <div class="field-label"><span>生成提示词</span><span class="field-hint">PROMPT</span></div>
+            <textarea id="globalPrompt" class="global-prompt" rows="4" placeholder="例如：强化釉面光泽，使用柔和侧光，保持器型和原始颜色…"></textarea>
+          </div>
+
+          <div class="settings-block">
+            <div class="field-label"><span>图片比例</span><span class="field-hint">RATIO</span></div>
+            <div class="ratio-grid" role="group" aria-label="选择画幅比例">
+              <button class="ratio-option is-active" data-ratio="1:1" type="button"><span>1:1</span></button>
+              <button class="ratio-option" data-ratio="3:4" type="button"><span>3:4</span></button>
+              <button class="ratio-option" data-ratio="9:16" type="button"><span>9:16</span></button>
+              <button class="ratio-option" data-ratio="16:9" type="button"><span>16:9</span></button>
+            </div>
+          </div>
+          <div class="settings-block">
+            <div class="field-label"><span>清晰度</span><span class="field-hint">OUTPUT</span></div>
+            <div class="resolution-grid" role="group" aria-label="选择清晰度">
+              <button class="resolution-option is-active" data-resolution="2K" type="button"><span>2K</span></button>
+              <button class="resolution-option" data-resolution="4K" type="button"><span>4K</span></button>
+            </div>
+          </div>
+          <button class="primary-button" id="generateButton" type="button" disabled><span class="button-light"></span><span id="generateButtonLabel">点击生成 · 10 积分/张</span><span class="arrow">↗</span></button>
+
+        </aside>
+
+        <section class="results-panel">
+          <div class="results-header">
+            <div>
+              <h2>主图生成<span id="ratioLabel">· 1:1</span></h2>
+            </div>
+            <div class="results-actions"><span class="generation-status" id="generationStatus">等待参考素材</span><button class="next-frame-button" id="nextFrameButton" type="button" hidden>一键生成所有主图 <span>↗</span></button><button class="download-button" id="downloadButton" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14" /></svg>下载全部</button></div>
+          </div>
+
+          <div class="result-grid" id="resultGrid">
+            <article class="empty-state" id="emptyState"><div class="empty-orbit"><span></span><span></span><span></span></div><h3>等待光场启动</h3><p>上传参考图后，这里会出现 5 张不同电商用途的主图骨架。</p><div class="empty-rule"><i></i><span>INPUT → MATERIAL → IMAGE SET</span><i></i></div></article>
+          </div>
+          <div class="results-footer"><span><i class="footer-light"></i> 强光感 · 材质保真 · 器型锁定</span><span class="mono">OUTPUT / <b id="outputCount">0</b> FRAMES</span></div>
+        </section>
+
+        <aside class="sidebar right-panel">
+          <div class="panel-heading"><div><span class="section-index">02</span><h2>光场分析</h2></div><span class="live-label"><i></i> LIVE</span></div>
+          <p class="panel-intro">来自参考图的视觉 DNA，将成为每张主图的共同底片。</p>
+          <div class="analysis-card" id="analysisCard">
+            <div class="analysis-placeholder"><span class="pulse-ring"></span><p>等待参考图分析</p><small>上传后自动提取色彩与材质</small></div>
+          </div>
+          <div class="analysis-section"><div class="field-label"><span>生成策略</span><span class="field-hint">PROMPT LOGIC</span></div><div class="strategy-list"><div><span class="strategy-num">01</span><span>锁定器型与比例</span><i>✓</i></div><div><span class="strategy-num">02</span><span>保留釉面色彩层次</span><i>✓</i></div><div><span class="strategy-num">03</span><span>叠加强定向光与边缘光</span><i>✓</i></div><div><span class="strategy-num">04</span><span>适配电商留白结构</span><i>✓</i></div></div></div>
+          <div class="tip-card"><span class="tip-icon">✦</span><div><strong>一个小建议</strong><p>尽量上传带有侧面或俯视角度的参考图，器物的立体光感会更稳定。</p></div></div>
+        </aside>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="editModal" hidden>
+      <section class="edit-modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+        <div class="modal-topline"><span class="eyebrow">FRAME EDITOR / <span id="modalFrameNumber">01</span></span><button class="icon-button" id="closeModal" type="button" aria-label="关闭编辑器">×</button></div>
+        <div class="modal-content"><div class="edit-preview" id="editPreview"><div class="preview-skeleton"><i></i><i></i><i></i></div><span class="preview-ratio" id="previewRatio">1 : 1</span></div><div class="edit-controls"><p class="eyebrow">局部重做指令</p><h2 id="editTitle">编辑主图</h2><p class="edit-subtitle" id="editSubtitle">在保留器型与色彩的前提下，调整这一张的氛围。</p><label for="editPrompt">告诉光场你想改变什么</label><textarea id="editPrompt" placeholder="例如：让釉面高光更明显，背景改为深灰石材，保留器物原色…"></textarea><div class="edit-presets"><button type="button" data-prompt="强化釉面高光与边缘轮廓光">强化高光</button><button type="button" data-prompt="背景改为深灰石材，增加桌面反射">深灰石材</button><button type="button" data-prompt="增加东方茶席氛围，光线更温暖">东方茶席</button></div><div class="modal-actions"><button class="secondary-button" id="undoButton" type="button" disabled>撤销上一版</button><button class="primary-button compact" id="regenerateButton" type="button"><span>重新生成这一张</span><span class="arrow">↗</span></button></div><p class="modal-status" id="modalStatus"></p></div></div>
+      </section>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

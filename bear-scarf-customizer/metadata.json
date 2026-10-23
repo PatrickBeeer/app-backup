@@ -1,0 +1,6 @@
+{
+  "name": "小熊围巾AI定制",
+  "description": "上传围巾图片，AI 自动生成产品图、情侣合拍图或自定义场景图。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

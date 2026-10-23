@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 180ms ease-out;
+}
+
+.shadow-hard-sm {
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.85);
+}

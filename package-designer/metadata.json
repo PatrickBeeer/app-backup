@@ -1,0 +1,5 @@
+{
+  "name": "包装设计工作台",
+  "description": "包装设计工作台，支持包装效果图生成、展开图生成与材质工艺标注。",
+  "requestFramePermissions": []
+}

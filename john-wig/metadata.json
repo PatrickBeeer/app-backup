@@ -1,0 +1,7 @@
+{
+  "name": "假发AI工作室 - 假发电商专用",
+  "description": "专为假发商家设计的AI视觉工具。通过上传发模图，瞬间生成高颜值的中国网红风格真人佩戴图，助力电商转化。",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

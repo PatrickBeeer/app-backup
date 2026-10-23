@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+body {
+  background-color: #f0f2f5;
+  color: #18181b;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-attachment: fixed;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.mesh-gradient {
+  background-color: #f0f2f5;
+  background-image:
+    radial-gradient(at 0% 0%, hsla(253,16%,7%,1) 0, transparent 50%),
+    radial-gradient(at 50% 0%, hsla(225,39%,30%,1) 0, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(339,49%,30%,1) 0, transparent 50%);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 2rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.05), 0 0 40px rgba(100, 149, 237, 0.05);
+}
+
+.glass-input {
+  background: rgba(255, 255, 255, 0.4);
+  border: none;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.glass-input:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.primary-button {
+  background: #000;
+  color: #fff;
+  border-radius: 1rem;
+  padding: 1rem 1.5rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.primary-button:hover {
+  transform: scale(1.02);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.primary-button:active {
+  transform: scale(0.98);
+}
+
+.primary-button:disabled {
+  background: #d4d4d8;
+  cursor: not-allowed;
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.4);
+  color: #18181b;
+  border-radius: 1rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.secondary-button:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.secondary-button:active {
+  transform: scale(0.98);
+}
+
+.label-caps {
+  font-size: 10px;
+  font-weight: 700;
+  color: #a1a1aa;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.6) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.5);
+  border-radius: 8px;
+}
+
+/* Custom Mesh Gradient Animation */
+.bg-mesh {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  background-color: #f0f2f5;
+  background-image: 
+    radial-gradient(at 10% 20%, rgba(230, 230, 250, 0.6) 0%, transparent 50%),
+    radial-gradient(at 90% 10%, rgba(173, 216, 230, 0.6) 0%, transparent 50%),
+    radial-gradient(at 50% 80%, rgba(255, 182, 193, 0.6) 0%, transparent 50%),
+    radial-gradient(at 80% 90%, rgba(221, 160, 221, 0.4) 0%, transparent 50%);
+  filter: blur(80px);
+  animation: mesh-float 20s ease-infinite alternate;
+}
+
+@keyframes mesh-float {
+  0% { transform: scale(1) translate(0, 0); }
+  50% { transform: scale(1.1) translate(2%, 2%); }
+  100% { transform: scale(1) translate(0, 0); }
+}

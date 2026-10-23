@@ -1,0 +1,5 @@
+{
+  "name": "AI产品纹理替换工具",
+  "description": "上传产品图和纹理图，AI自动替换产品纹理，并可生成多角度视图。",
+  "requestFramePermissions": []
+}

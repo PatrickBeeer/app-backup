@@ -1,0 +1,6 @@
+.env
+.env.local
+.run/
+dist/
+node_modules/
+logs/

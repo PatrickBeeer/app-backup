@@ -1,0 +1,20 @@
+import path from 'path';
+import {defineConfig} from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  base: '/standalone/s_seedance2_test/',
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, 'src'),
+    },
+  },
+  server: {
+    host: '0.0.0.0',
+    port: 3000,
+    fs: {
+      allow: [path.resolve(__dirname, '../..')],
+    },
+  },
+});

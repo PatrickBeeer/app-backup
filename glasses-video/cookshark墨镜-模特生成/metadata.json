@@ -1,0 +1,6 @@
+{
+  "name": "cookshark墨镜-模特生成",
+  "description": "Upload a photo of your sunglasses, and our AI will generate a professional fashion model wearing them. Perfect for creating stylish product showcases.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

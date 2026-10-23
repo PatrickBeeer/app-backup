@@ -1,0 +1,6 @@
+{
+  "name": "内衣试衣间",
+  "description": "上传服装图并选择风格灵感，快速生成高质量试衣效果图。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

@@ -1,0 +1,8 @@
+{
+  "name": "小红书爆款助手",
+  "description": "AI-powered tool for e-commerce sellers to generate viral Xiaohongshu (Little Red Book) content, including product analysis, copy generation, and aesthetic scene suggestions.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

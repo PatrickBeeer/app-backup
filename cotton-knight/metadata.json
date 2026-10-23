@@ -1,0 +1,6 @@
+{
+  "name": "洗脸巾-主图生成",
+  "description": "洗脸巾主图生成器，基于参考图与场景风格，获取高质量展示图。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

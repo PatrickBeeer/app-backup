@@ -1,0 +1,5 @@
+{
+  "name": "AI短剧导演（独立版）",
+  "description": "输入故事梗概并生成分镜脚本、中文文生图提示词与图生视频提示词。",
+  "requestFramePermissions": []
+}

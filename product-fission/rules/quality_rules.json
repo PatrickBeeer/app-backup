@@ -1,0 +1,14 @@
+{
+  "fail_terms": [
+    "无效退款",
+    "包治",
+    "稳赚"
+  ],
+  "warning_terms": [
+    "高级感",
+    "懒人必备",
+    "氛围感"
+  ],
+  "title_min_len": 8,
+  "title_max_len": 60
+}

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>COOKSHARK 酷鲨墨镜 - AI模特试戴与大片生成系统</title>
+    <!-- Original CDN Tailwind configuration retained for reference; local Tailwind is compiled at build time.
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                gold: '#D4AF37',
+                'gold-light': '#F3E5AB',
+                'gold-dark': '#997A15',
+                dark: '#0B0D12',
+                panel: '#13161F',
+                card: '#1A1D28',
+              }
+            }
+          }
+        }
+      }
+    -->
+    <style>
+      body {
+        background-color: #07080c;
+        background-image: 
+          radial-gradient(circle at 50% 0%, rgba(212, 175, 55, 0.08) 0%, transparent 60%),
+          radial-gradient(circle at 100% 100%, rgba(30, 41, 59, 0.4) 0%, transparent 50%),
+          radial-gradient(circle at 0% 50%, rgba(15, 23, 42, 0.5) 0%, transparent 50%);
+        background-attachment: fixed;
+        color: #f1f5f9;
+        overflow-x: hidden;
+      }
+      .ambient-glow-1 {
+        position: fixed;
+        top: -10%;
+        left: 20%;
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, rgba(212, 175, 55, 0.06) 0%, rgba(0,0,0,0) 70%);
+        pointer-events: none;
+        z-index: 0;
+      }
+      .ambient-glow-2 {
+        position: fixed;
+        bottom: -10%;
+        right: 10%;
+        width: 700px;
+        height: 700px;
+        background: radial-gradient(circle, rgba(99, 102, 241, 0.05) 0%, rgba(0,0,0,0) 70%);
+        pointer-events: none;
+        z-index: 0;
+      }
+    </style>
+    <link rel="stylesheet" href="/index.css">
+  </head>
+  <body class="antialiased selection:bg-amber-500/30 selection:text-amber-200">
+    <div class="ambient-glow-1"></div>
+    <div class="ambient-glow-2"></div>
+    <div id="root" class="relative z-10"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

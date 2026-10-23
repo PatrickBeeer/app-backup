@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    color: #0f172a;
+    background: #f8fafc;
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+}

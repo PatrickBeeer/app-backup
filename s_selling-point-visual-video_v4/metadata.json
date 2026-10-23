@@ -1,0 +1,8 @@
+{
+  "name": "卖点可视化（视频版）4.0",
+  "description": "A professional AI-powered single-page workbench for product analysis, storyboard generation, and short video advertisement creation using Gemini and Veo models.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

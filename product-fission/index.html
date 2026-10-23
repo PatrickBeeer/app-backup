@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>商品裂变实验室</title>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">⚡</span>
+        <span class="brand-name">商品裂变实验室</span>
+      </div>
+      <nav class="nav">
+        <a class="nav-item active" data-view="home"><span class="nav-idx">1</span>产品分析</a>
+        <a class="nav-item" data-view="fission"><span class="nav-idx">2</span>方案执行</a>
+        <a class="nav-item" data-view="history"><span class="nav-idx">3</span>历史记录</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="demoBadge" class="demo-badge hidden">DEMO 模式</div>
+        <div class="side-note">
+          左边上传一个产品，<br />右边直接出人群、场景和价格档位。
+        </div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <section id="view-home" class="view">
+        <header class="page-head">
+          <h1>商品裂变实验室</h1>
+          <p class="subtitle">上传产品图片做分析，AI 识别产品 DNA；分析完成后自动进入「方案执行」页。</p>
+        </header>
+
+        <div class="split">
+          <div class="split-left">
+            <div class="card form-card sticky">
+              <div class="step">
+                <div class="step-head">
+                  <span class="step-num">1</span>
+                  <h3>上传产品图片</h3>
+                  <span class="step-tip">JPG / PNG</span>
+                </div>
+                <div class="uploader" id="uploader">
+                  <input type="file" id="imageInput" accept="image/png,image/jpeg" hidden />
+                  <div class="upload-drop" id="uploadDrop">
+                    <div class="upload-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+                        <circle cx="8.5" cy="9" r="1.6"></circle>
+                        <path d="M21 15.5 16 11 6 21"></path>
+                      </svg>
+                    </div>
+                    <div class="upload-main">点击或拖拽图片到此处</div>
+                    <div class="upload-sub">无需填写任何信息 · 产品是什么、值多少钱，全部由 AI 自动分析</div>
+                  </div>
+                  <div id="previewWrap" class="preview-wrap hidden">
+                    <img id="imagePreview" class="upload-preview" alt="预览" />
+                    <div class="preview-side">
+                      <div class="preview-label">已上传</div>
+                      <div class="preview-name" id="previewName">产品图片</div>
+                      <button type="button" class="btn-ghost" id="reuploadBtn">重新选择</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="startBtn" class="btn-primary">开始分析（10积分）</button>
+                <div id="homeError" class="error hidden"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="split-right">
+            <div id="analysisContent">
+              <div class="empty-box">
+                <div class="eb-title">还没有分析结果</div>
+                <div class="eb-sub">在左边上传一张产品图片，点「开始分析」，<br />这里会给出产品 DNA；分析完成后会自动跳到「方案执行」页。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-fission" class="view hidden">
+        <header class="page-head">
+          <h2>方案执行</h2>
+          <p class="subtitle">按「人群 → 场景 → 价格档位」排列，点开任意一个档位，看它的主图与详情页执行方案。</p>
+        </header>
+        <div id="fissionContent"></div>
+      </section>
+
+      <section id="view-history" class="view hidden">
+        <header class="page-head">
+          <h2>历史记录</h2>
+          <p class="subtitle">本地保存的裂变结果</p>
+        </header>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
+      <div id="loading" class="loading hidden">
+        <div class="loading-card">
+          <div class="spinner"></div>
+          <div class="loading-text" id="loadingText">AI 正在分析产品…</div>
+          <div class="loading-steps">
+            <span class="ls" data-s="0">识别产品</span>
+            <span class="ls" data-s="1">拆出人群场景</span>
+            <span class="ls" data-s="2">细分价格档位</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="drawer-overlay hidden" id="drawerOverlay"></div>
+  <aside class="drawer hidden" id="drawer"></aside>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "name": "数字人口播",
+  "description": "上传1至3张人物参考图与声音样本，用百炼生成口播音频，通过 CPRT 生成对口型视频。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["video-generation", "audio-synthesis", "multimodal-reference"]
+}

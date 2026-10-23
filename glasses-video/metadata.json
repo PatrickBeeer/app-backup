@@ -1,0 +1,6 @@
+{
+  "name": "高端眼镜视频工作台",
+  "description": "基于豆包视频生成模型和Gemini图片生成模型的眼镜商品视频与AI模特试戴图创作工作台。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

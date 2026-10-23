@@ -1,0 +1,1 @@
+// Component integrated into sidebar

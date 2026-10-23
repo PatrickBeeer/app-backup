@@ -1,0 +1,5 @@
+{
+  "name": "AI相机调度器",
+  "description": "基于Gemini 2.5 Flash Image模型的智能图像视角调整工具。通过二维矢量滑块和线性控件，重绘图片的摄像机角度与位置。",
+  "requestFramePermissions": []
+}

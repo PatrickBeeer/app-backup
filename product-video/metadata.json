@@ -1,0 +1,8 @@
+{
+  "name": "AI 产品视频",
+  "description": "Standalone product video workbench for product analysis, storyboard generation, short-form video creation, dubbing, and Kling-based media operations.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

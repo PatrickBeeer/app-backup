@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: #0f172a;
+    background: radial-gradient(circle at 15% 10%, #dbeafe 0%, #f8fafc 45%, #e2e8f0 100%);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 260ms ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.scene {
+  perspective: 800px;
+}
+
+.cube {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  transform-style: preserve-3d;
+  transition: transform 160ms linear;
+}
+
+.cube-face {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+
+.cube-face-front {
+  transform: translateZ(48px);
+}
+
+.cube-face-back {
+  transform: rotateY(180deg) translateZ(48px);
+}
+
+.cube-face-right {
+  transform: rotateY(90deg) translateZ(48px);
+}
+
+.cube-face-left {
+  transform: rotateY(-90deg) translateZ(48px);
+}
+
+.cube-face-top {
+  transform: rotateX(90deg) translateZ(48px);
+}
+
+.cube-face-bottom {
+  transform: rotateX(-90deg) translateZ(48px);
+}

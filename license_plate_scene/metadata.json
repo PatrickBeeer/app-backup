@@ -1,0 +1,5 @@
+{
+  "name": "门牌号场景生成",
+  "description": "上传门牌或产品图，快速生成高质感场景展示图。",
+  "requestFramePermissions": []
+}

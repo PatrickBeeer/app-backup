@@ -1,0 +1,2029 @@
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import mimetypes
+import os
+import re
+import shutil
+import urllib.error
+import urllib.request
+import warnings
+from datetime import datetime
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import unquote
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+import cgi
+
+import openpyxl
+from openpyxl.utils.datetime import from_excel
+
+
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data"
+MONTHS_DIR = DATA_DIR / "months"
+UPLOADS_DIR = ROOT / "uploads"
+MANIFEST_PATH = DATA_DIR / "manifest.json"
+EMBEDDED_DATA_PATH = DATA_DIR / "embedded-data.js"
+ENV_PATH = ROOT / ".env"
+EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+_ENV_LOADED = False
+
+
+class UnrecognizedWorkbook(ValueError):
+    def __init__(self, message: str, profile: dict):
+        super().__init__(message)
+        self.profile = profile
+
+
+class AiRecognitionError(RuntimeError):
+    pass
+
+
+class FinanceHandler(SimpleHTTPRequestHandler):
+    def do_POST(self) -> None:
+        if self.path == "/api/import":
+            self.handle_import()
+            return
+        if self.path == "/api/smart-entry":
+            self.handle_smart_entry()
+            return
+        if self.path == "/api/manual-entry":
+            self.handle_manual_entry()
+            return
+        if self.path == "/api/update-entry":
+            self.handle_update_entry()
+            return
+        if self.path == "/api/delete-entry":
+            self.handle_delete_entry()
+            return
+        if self.path == "/api/rename-category":
+            self.handle_rename_category()
+            return
+        if self.path == "/api/chat-edit":
+            self.handle_chat_edit()
+            return
+        self.send_error(404, "Not found")
+
+    def handle_import(self) -> None:
+        try:
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    "REQUEST_METHOD": "POST",
+                    "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                    "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+                },
+            )
+            month_id = str(form.getfirst("month", "")).strip()
+            file_item = form["file"] if "file" in form else None
+            parse_hint = str(form.getfirst("hint", "")).strip()
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            if file_item is None or not getattr(file_item, "filename", ""):
+                raise ValueError("没有收到资料文件。")
+
+            MONTHS_DIR.mkdir(parents=True, exist_ok=True)
+            UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            original_name = sanitize_filename(file_item.filename)
+            uploaded_path = UPLOADS_DIR / f"{month_id}_{original_name}"
+            with uploaded_path.open("wb") as out:
+                shutil.copyfileobj(file_item.file, out)
+
+            extension = uploaded_path.suffix.lower()
+            if extension in EXCEL_EXTENSIONS:
+                month_data = parse_workbook(uploaded_path, month_id, parse_hint)
+            elif extension in IMAGE_EXTENSIONS:
+                month_data = image_month_data(uploaded_path, month_id, parse_hint)
+            else:
+                raise ValueError("暂不支持该文件格式。请上传 .xlsx、.xlsm、.png、.jpg、.jpeg 或 .webp。")
+            import_message = month_data.pop("_importMessage", "")
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "attachmentCount": len(month_data.get("attachments", [])),
+                    "dataPath": f"data/months/{month_id}.json",
+                    "message": import_message,
+                }
+            )
+        except UnrecognizedWorkbook as exc:
+            self.send_json(
+                {
+                    "ok": False,
+                    "needsClarification": True,
+                    "error": str(exc),
+                    "profile": exc.profile,
+                },
+                status=422,
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_smart_entry(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            month_id = clean_text(payload.get("month"))
+            text = clean_text(payload.get("text"))
+            hint = clean_text(payload.get("hint"))
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            if not text:
+                raise ValueError("请输入要识别入账的文字。")
+            if not ai_api_available():
+                raise ValueError("请先在 .env 中配置 OPENAI_API_KEY 或 GEMINI_API_KEY，才能使用 AI 文字录入。")
+
+            entries = extract_ai_text_entries(text, month_id, hint)
+            if not entries:
+                raise ValueError("AI 没有识别到可入账明细，请补充金额、项目或类型。")
+
+            source_ref = text_source_ref(month_id, text)
+            for entry in entries:
+                entry["sourceKind"] = "ai-text"
+                entry["sourceRef"] = source_ref
+            existing = load_existing_month(month_id)
+            month_data = upsert_ai_entries(existing, month_id, entries, "AI文字录入")
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(entries),
+                    "dataPath": f"data/months/{month_id}.json",
+                    "message": f"{month_data['label']} 已从文字识别并导入 {len(entries)} 条明细。",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_update_entry(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            month_id = clean_text(payload.get("month"))
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            existing = load_existing_month(month_id)
+            if not existing:
+                raise ValueError("该月份还没有可修改的数据。")
+            entry_index = int(payload.get("index"))
+            entries = list(existing.get("entries", []))
+            if entry_index < 0 or entry_index >= len(entries):
+                raise ValueError("没有找到要修改的明细。")
+
+            entries[entry_index] = corrected_entry(entries[entry_index], payload)
+            month_data = month_data_with_entries(existing, month_id, entries, "手动修正")
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "dataPath": f"data/months/{month_id}.json",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_delete_entry(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            month_id = clean_text(payload.get("month"))
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            existing = load_existing_month(month_id)
+            if not existing:
+                raise ValueError("该月份还没有可删除的数据。")
+            entry_index = int(payload.get("index"))
+            entries = list(existing.get("entries", []))
+            if entry_index < 0 or entry_index >= len(entries):
+                raise ValueError("没有找到要删除的明细。")
+
+            entries.pop(entry_index)
+            month_data = month_data_with_entries(existing, month_id, entries, "手动删除")
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "dataPath": f"data/months/{month_id}.json",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_rename_category(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            month_id = clean_text(payload.get("month"))
+            from_category = clean_text(payload.get("fromCategory"))
+            to_category = clean_text(payload.get("toCategory"))
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            if not from_category or not to_category:
+                raise ValueError("请输入原分类和新分类。")
+            existing = load_existing_month(month_id)
+            if not existing:
+                raise ValueError("该月份还没有可修改的数据。")
+            changed = 0
+            entries = []
+            for entry in existing.get("entries", []):
+                next_entry = dict(entry)
+                if clean_text(next_entry.get("category")) == from_category:
+                    next_entry["category"] = to_category
+                    next_entry["correctedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    changed += 1
+                entries.append(next_entry)
+            if not changed:
+                raise ValueError("没有找到这个分类下的明细。")
+
+            month_data = month_data_with_entries(existing, month_id, entries, "分类重命名")
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "changedCount": changed,
+                    "category": to_category,
+                    "dataPath": f"data/months/{month_id}.json",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_chat_edit(self) -> None:
+        try:
+            content_type = self.headers.get("Content-Type", "")
+            uploaded_path = None
+            if content_type.startswith("multipart/form-data"):
+                form = cgi.FieldStorage(
+                    fp=self.rfile,
+                    headers=self.headers,
+                    environ={
+                        "REQUEST_METHOD": "POST",
+                        "CONTENT_TYPE": content_type,
+                        "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+                    },
+                )
+                month_id = str(form.getfirst("month", "")).strip()
+                instruction = str(form.getfirst("instruction", "")).strip()
+                file_item = form["file"] if "file" in form else None
+                if file_item is not None and getattr(file_item, "filename", ""):
+                    extension = Path(file_item.filename).suffix.lower()
+                    if extension not in IMAGE_EXTENSIONS:
+                        raise ValueError("对话修改截图仅支持 .png、.jpg、.jpeg 或 .webp。")
+                    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+                    original_name = sanitize_filename(file_item.filename)
+                    uploaded_path = UPLOADS_DIR / f"{month_id}_edit_{original_name}"
+                    with uploaded_path.open("wb") as out:
+                        shutil.copyfileobj(file_item.file, out)
+            else:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                month_id = clean_text(payload.get("month"))
+                instruction = clean_text(payload.get("instruction"))
+            month_id = month_id_from_instruction(instruction, month_id)
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+            if not instruction and uploaded_path is None:
+                raise ValueError("请输入要修改的内容，或上传一张修改截图。")
+            existing = load_existing_month(month_id)
+            if not existing:
+                raise ValueError("该月份还没有可修改的数据。")
+
+            actions_payload = infer_chat_edit_actions(instruction, existing)
+            if not actions_payload.get("actions"):
+                if not ai_api_available():
+                    raise ValueError("请先配置 OPENAI_API_KEY 或 GEMINI_API_KEY，才能使用对话修改。")
+                actions_payload = extract_chat_edit_actions(existing, instruction, uploaded_path)
+            entries, summary = apply_chat_edit_actions(existing.get("entries", []), actions_payload)
+            if not summary["changed"]:
+                raise ValueError("没有执行任何修改，请把要改的项目、金额或分类说得更明确。")
+
+            month_data = month_data_with_entries(existing, month_id, entries, "对话修改")
+            if uploaded_path is not None:
+                attachment = {
+                    "type": "image",
+                    "name": uploaded_path.name,
+                    "path": upload_relative_path(uploaded_path),
+                    "kind": "修改截图",
+                }
+                attachments = month_data.get("attachments", [])
+                attachments = [item for item in attachments if item.get("path") != attachment["path"]]
+                attachments.append(attachment)
+                month_data["attachments"] = attachments
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "changedCount": summary["changed"],
+                    "message": f"{month_data['label']} 已按指令完成 {summary['changed']} 处修改。",
+                    "dataPath": f"data/months/{month_id}.json",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def handle_manual_entry(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            month_id = clean_text(payload.get("month"))
+            if not re.fullmatch(r"\d{4}-\d{2}", month_id):
+                raise ValueError("月份格式不正确，请选择类似 2026-05 的月份。")
+
+            entry = manual_entry_from_payload(payload)
+            MONTHS_DIR.mkdir(parents=True, exist_ok=True)
+            existing = load_existing_month(month_id)
+            month_data = upsert_manual_entry(existing, month_id, entry)
+            output_path = MONTHS_DIR / f"{month_id}.json"
+            output_path.write_text(json.dumps(month_data, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_manifest(f"data/months/{month_id}.json")
+            self.send_json(
+                {
+                    "ok": True,
+                    "monthId": month_id,
+                    "label": month_data["label"],
+                    "entryCount": len(month_data["entries"]),
+                    "dataPath": f"data/months/{month_id}.json",
+                }
+            )
+        except Exception as exc:
+            self.send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def send_json(self, payload: dict, status: int = 200) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def translate_path(self, path: str) -> str:
+        path = unquote(path.split("?", 1)[0].split("#", 1)[0])
+        if path == "/":
+            path = "/index.html"
+        safe_parts = [part for part in path.split("/") if part and part not in {".", ".."}]
+        return str(ROOT.joinpath(*safe_parts))
+
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+
+def parse_workbook(path: Path, month_id: str, parse_hint: str = "") -> dict:
+    existing = load_existing_month(month_id)
+    workbook = openpyxl.load_workbook(path, data_only=True, read_only=False)
+    detail_sheet = workbook["明细数据"] if "明细数据" in workbook.sheetnames else workbook.worksheets[0]
+    dashboard_sheet = workbook["老板经营看板"] if "老板经营看板" in workbook.sheetnames else None
+    ai_error = ""
+
+    entries = extract_entries(detail_sheet)
+    parsed_kind = "detail" if entries else ""
+    if not entries:
+        entries = extract_salary_entries(workbook)
+        parsed_kind = "salary" if entries else ""
+    if not entries:
+        entries = extract_enrollment_entries(workbook, month_id)
+        parsed_kind = "enrollment" if entries else ""
+    if not entries and parse_hint:
+        entries = extract_hint_entries(workbook, month_id, parse_hint)
+        parsed_kind = "hint" if entries else ""
+    if not entries and ai_api_available():
+        try:
+            entries = extract_ai_entries(workbook, month_id, parse_hint)
+            parsed_kind = "ai" if entries else ""
+        except AiRecognitionError as exc:
+            ai_error = str(exc)
+    if not entries:
+        profile = inspect_workbook_profile(workbook)
+        if parse_hint:
+            profile["userHint"] = parse_hint
+        profile["aiRecognition"] = "已尝试但未成功" if ai_error else ("未配置密钥" if not ai_api_available() else "未识别到明细")
+        if ai_error:
+            profile["aiError"] = ai_error
+        raise UnrecognizedWorkbook("没有自动识别到可入账明细。", profile)
+
+    entries = merge_existing_entries(existing, entries, parsed_kind)
+
+    gross_revenue = sum(item["amount"] for item in entries if item["type"] == "income")
+    refunds = sum(item["amount"] for item in entries if item["type"] == "refund")
+    adjustments = sum(item["amount"] for item in entries if item["type"] == "adjustment")
+    net_revenue = gross_revenue + refunds + adjustments
+    expenses = sum(item["amount"] for item in entries if item["type"] == "expense")
+    book_profit = gross_revenue - expenses
+    net_profit = net_revenue - expenses
+    net_profit_rate = net_profit / net_revenue if net_revenue else 0
+
+    title = read_cell(dashboard_sheet, "A1") if dashboard_sheet else ""
+    if not title:
+        title = f"{month_label(month_id)}财务报表"
+
+    attachments = existing.get("attachments", []) if existing else []
+    spreadsheet_attachment = {
+        "type": "spreadsheet",
+        "name": path.name,
+        "path": upload_relative_path(path),
+        "kind": "Excel表格",
+    }
+    attachments = [item for item in attachments if item.get("path") != spreadsheet_attachment["path"]]
+    attachments.append(spreadsheet_attachment)
+
+    return {
+        "id": month_id,
+        "label": month_label(month_id),
+        "sourceFile": str(path),
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "title": title,
+        "summary": {
+            "grossRevenue": round(gross_revenue, 2),
+            "refunds": round(refunds, 2),
+            "netRevenue": round(net_revenue, 2),
+            "expenses": round(expenses, 2),
+            "bookProfit": round(book_profit, 2),
+            "netProfit": round(net_profit, 2),
+            "netProfitRate": net_profit_rate,
+        },
+        "entries": entries,
+        "attachments": attachments,
+        "notes": build_notes(entries),
+        "actions": default_actions(),
+    }
+
+
+def image_month_data(path: Path, month_id: str, parse_hint: str = "") -> dict:
+    existing = load_existing_month(month_id)
+    attachment = {
+        "type": "image",
+        "name": path.name,
+        "path": upload_relative_path(path),
+        "kind": "图片/截图凭证",
+    }
+    attachments = existing.get("attachments", []) if existing else []
+    attachments = [item for item in attachments if item.get("path") != attachment["path"]]
+    attachments.append(attachment)
+    ai_entries = []
+    ai_error = ""
+
+    if ai_api_available():
+        try:
+            ai_entries = extract_ai_image_entries(path, month_id, parse_hint)
+        except AiRecognitionError as exc:
+            ai_error = str(exc)
+
+    if ai_entries:
+        source_ref = upload_relative_path(path)
+        for entry in ai_entries:
+            entry["sourceKind"] = "ai-image"
+            entry["sourceRef"] = source_ref
+        month_data = upsert_ai_entries(existing, month_id, ai_entries, "截图识别")
+        month_data["sourceFile"] = str(path)
+        month_data["attachments"] = attachments
+        month_data["notes"] = merge_note(
+            month_data.get("notes", []),
+            {"title": "截图识别", "text": f"已从 {path.name} 自动识别 {len(ai_entries)} 条明细，请核对金额和分类。"},
+        )
+        month_data["_importMessage"] = f"{month_label(month_id)} 已从截图识别并导入 {len(ai_entries)} 条明细。"
+        return month_data
+
+    if ai_error:
+        note_text = f"已上传图片/截图作为原始凭证；AI识别失败：{ai_error}"
+        import_message = f"{month_label(month_id)} 已保存截图，但 AI 识别失败，请查看口径说明。"
+    elif not ai_api_available():
+        note_text = "已上传图片/截图作为原始凭证；配置 OPENAI_API_KEY 或 GEMINI_API_KEY 后可自动识别入账。"
+        import_message = f"{month_label(month_id)} 已保存截图；配置模型密钥后可自动识别入账。"
+    else:
+        note_text = "已上传图片/截图作为原始凭证；AI没有识别到可入账明细。"
+        import_message = f"{month_label(month_id)} 已保存截图；AI没有识别到可入账明细。"
+
+    if existing:
+        existing["sourceFile"] = str(path)
+        existing["updatedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        existing["attachments"] = attachments
+        existing["notes"] = merge_note(
+            existing.get("notes", []),
+            {"title": "图片凭证", "text": note_text},
+        )
+        existing["_importMessage"] = import_message
+        return existing
+
+    return {
+        "id": month_id,
+        "label": month_label(month_id),
+        "sourceFile": str(path),
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "title": f"{month_label(month_id)}财务资料",
+        "summary": {
+            "grossRevenue": 0,
+            "refunds": 0,
+            "netRevenue": 0,
+            "expenses": 0,
+            "bookProfit": 0,
+            "netProfit": 0,
+            "netProfitRate": 0,
+        },
+        "entries": [],
+        "attachments": attachments,
+        "notes": [
+            {"title": "图片凭证", "text": note_text},
+            {"title": "待核对", "text": "截图识别后请核对收入、支出、退款和成本分类。"},
+        ],
+        "actions": [
+            {"title": "补充说明", "text": "如截图结构复杂，上传时在识别说明里写明这是收入、支出、退款或工资表。"},
+            {"title": "人工核对", "text": "图片凭证可用于核对原始截图和后续录入数据。"},
+        ],
+        "_importMessage": import_message,
+    }
+
+
+def manual_entry_from_payload(payload: dict) -> dict:
+    entry_type = clean_text(payload.get("type"))
+    if entry_type not in {"income", "expense", "refund", "adjustment"}:
+        raise ValueError("请选择正确的收支类型。")
+    name = clean_text(payload.get("name"))
+    if not name:
+        raise ValueError("请输入项目名称。")
+    amount = to_number(payload.get("amount"))
+    if amount is None or amount <= 0:
+        raise ValueError("请输入大于 0 的金额。")
+
+    raw_category = clean_text(payload.get("category"))
+    if entry_type == "expense":
+        category = normalize_cost_category(raw_category or "未分类成本", name)
+        amount = abs(amount)
+    elif entry_type == "refund":
+        category = "退款"
+        amount = -abs(amount)
+    elif entry_type == "adjustment":
+        category = raw_category or "调整"
+        amount = abs(amount)
+    else:
+        category = normalize_income_category(raw_category or "营收", name)
+        amount = abs(amount)
+
+    return {
+        "id": f"manual-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        "name": name,
+        "amount": round(amount, 2),
+        "type": entry_type,
+        "category": category,
+        "sourceKind": "manual",
+        "note": clean_text(payload.get("note")),
+    }
+
+
+def corrected_entry(existing_entry: dict, payload: dict) -> dict:
+    entry_type = clean_text(payload.get("type"))
+    if entry_type not in {"income", "expense", "refund", "adjustment"}:
+        raise ValueError("请选择正确的收支类型。")
+    name = clean_text(payload.get("name"))
+    if not name:
+        raise ValueError("请输入项目名称。")
+    amount = to_number(payload.get("amount"))
+    if amount is None or amount <= 0:
+        raise ValueError("请输入大于 0 的金额。")
+
+    raw_category = clean_text(payload.get("category"))
+    if entry_type == "expense":
+        category = normalize_cost_category(raw_category or "未分类成本", name)
+        amount = abs(amount)
+    elif entry_type == "refund":
+        category = "退款"
+        amount = -abs(amount)
+    elif entry_type == "adjustment":
+        category = raw_category or "调整"
+        amount = abs(amount)
+    else:
+        category = normalize_income_category(raw_category or "营收", name)
+        amount = abs(amount)
+
+    updated = dict(existing_entry)
+    updated.update(
+        {
+            "name": name,
+            "amount": round(amount, 2),
+            "type": entry_type,
+            "category": category,
+            "note": clean_text(payload.get("note")),
+            "correctedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+    )
+    return updated
+
+
+def extract_chat_edit_actions(month_data: dict, instruction: str, image_path: Path | None = None) -> dict:
+    entries = [
+        {
+            "index": index + 1,
+            "name": clean_text(entry.get("name")),
+            "type": clean_text(entry.get("type")),
+            "category": clean_text(entry.get("category")),
+            "amount": entry.get("amount"),
+            "note": clean_text(entry.get("note"))[:120],
+        }
+        for index, entry in enumerate(month_data.get("entries", []))
+    ]
+    categories = sorted({entry["category"] for entry in entries if entry["category"]})
+    context = {
+        "monthId": month_data.get("id"),
+        "monthLabel": month_data.get("label"),
+        "instruction": instruction,
+        "hasImage": image_path is not None,
+        "categories": categories,
+        "entries": entries[:120],
+    }
+    prompt = (
+        "你是财务看板的数据修正助手。请把用户的自然语言修改指令转换成 JSON 操作。"
+        "只返回 JSON，格式为 {\"actions\":[...]}。允许的 action："
+        "rename_category: {action, fromCategory, toCategory}; "
+        "update_entry: {action, index, name, type, category, amount, note}; "
+        "delete_entry: {action, index}; "
+        "delete_matching: {action, type, category, nameContains, noteContains}。"
+        "index 使用上下文里的 1 基序号。type 只能是 income、expense、refund、adjustment。"
+        "如果用户只说修改分类名称，优先使用 rename_category。"
+        "如果用户说删除全部、所有、这一类等批量删除，请优先使用 delete_matching，并至少填写 type、category、nameContains 或 noteContains 之一。"
+        "如果无法唯一确定要改哪条明细，不要猜，返回空 actions。"
+        "不要新增收入或支出；这里只处理修正、删除和分类重命名。"
+        "如果用户上传了截图，请根据截图内容和当前明细进行比对后生成修正操作。"
+        f"\n上下文：{json.dumps(context, ensure_ascii=False)}"
+    )
+    if gemini_api_key():
+        parts = [{"text": prompt}]
+        if image_path is not None:
+            parts.append({"inline_data": {"mime_type": image_mime_type(image_path), "data": base64.b64encode(image_path.read_bytes()).decode("ascii")}})
+        return call_gemini_json(parts)
+    if image_path is not None:
+        raise AiRecognitionError("当前对话截图修改需要 GEMINI_API_KEY。")
+    return call_openai_json(prompt)
+
+
+def infer_chat_edit_actions(instruction: str, month_data: dict) -> dict:
+    text = clean_text(instruction)
+    if not text:
+        return {"actions": []}
+    rename_action = infer_rename_action(text, month_data)
+    if rename_action:
+        return {"actions": [rename_action]}
+    if any(word in text for word in ["删除", "删掉", "移除"]) and any(word in text for word in ["全部", "所有", "全部的", "所有的"]):
+        action = {"action": "delete_matching"}
+        if "收入" in text or "营收" in text:
+            action["type"] = "income"
+        elif "支出" in text or "成本" in text or "费用" in text:
+            action["type"] = "expense"
+        elif "退款" in text:
+            action["type"] = "refund"
+        elif "调整" in text:
+            action["type"] = "adjustment"
+
+        categories = sorted({clean_text(entry.get("category")) for entry in month_data.get("entries", []) if clean_text(entry.get("category"))}, key=len, reverse=True)
+        for category in categories:
+            compact_category = category.replace("营收", "收入")
+            if category in text or compact_category in text:
+                action["category"] = category
+                break
+        if "category" not in action and "线下课" in text:
+            matching_categories = [category for category in categories if "线下课" in category]
+            if matching_categories:
+                action["category"] = matching_categories[0]
+            else:
+                action["nameContains"] = "线下课"
+        if "category" not in action and "课程" in text and ("收入" in text or "营收" in text):
+            matching_categories = [category for category in categories if "课程" in category and ("收入" in category or "营收" in category)]
+            if matching_categories:
+                action["category"] = matching_categories[0]
+        if any(key in action for key in ["type", "category", "nameContains", "noteContains"]):
+            return {"actions": [action]}
+    return {"actions": []}
+
+
+def infer_rename_action(text: str, month_data: dict) -> dict | None:
+    match = re.search(r"把\s*(.+?)\s*(?:改成|改为|改名为|重命名为)\s*(.+)", text)
+    if not match:
+        match = re.search(r"将\s*(.+?)\s*(?:改成|改为|改名为|重命名为)\s*(.+)", text)
+    if not match:
+        return None
+    from_name = cleanup_rename_text(match.group(1))
+    to_name = cleanup_rename_text(match.group(2))
+    if not from_name or not to_name or from_name == to_name:
+        return None
+
+    categories = sorted({clean_text(entry.get("category")) for entry in month_data.get("entries", []) if clean_text(entry.get("category"))}, key=len, reverse=True)
+    for category in categories:
+        if from_name == category:
+            return {"action": "rename_category", "fromCategory": category, "toCategory": to_name}
+    for category in categories:
+        if from_name in category or category in from_name:
+            return {"action": "rename_category", "fromCategory": category, "toCategory": to_name}
+
+    matches = [
+        (index, entry)
+        for index, entry in enumerate(month_data.get("entries", []), start=1)
+        if clean_text(entry.get("name")) == from_name
+    ]
+    if len(matches) == 1:
+        index, entry = matches[0]
+        return {
+            "action": "update_entry",
+            "index": index,
+            "name": to_name,
+            "type": clean_text(entry.get("type")),
+            "category": clean_text(entry.get("category")),
+            "amount": abs(float(entry.get("amount") or 0)),
+            "note": clean_text(entry.get("note")),
+        }
+    return None
+
+
+def cleanup_rename_text(text: str) -> str:
+    cleaned = clean_text(text)
+    cleaned = re.sub(r"^(分类|名称|项目|明细|成本分类|收入分类|支出分类)", "", cleaned)
+    cleaned = re.sub(r"(这个|这条|该|的)?(分类|名称|项目|明细)$", "", cleaned)
+    cleaned = re.split(r"[，。；;,.]", cleaned, maxsplit=1)[0]
+    return cleaned.strip(" 「」'\"")
+
+
+def month_id_from_instruction(instruction: str, fallback_month_id: str) -> str:
+    text = clean_text(instruction)
+    fallback_year = fallback_month_id.split("-")[0] if re.fullmatch(r"\d{4}-\d{2}", fallback_month_id) else str(datetime.now().year)
+    match = re.search(r"(20\d{2})[-/.年]\s*(0?[1-9]|1[0-2])\s*月?", text)
+    if match:
+        return f"{match.group(1)}-{int(match.group(2)):02d}"
+    match = re.search(r"(?<!\d)(0?[1-9]|1[0-2])\s*月份?", text)
+    if match:
+        return f"{fallback_year}-{int(match.group(1)):02d}"
+    chinese_months = {
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+        "十一": 11,
+        "十二": 12,
+    }
+    for label, month in sorted(chinese_months.items(), key=lambda item: len(item[0]), reverse=True):
+        if f"{label}月" in text or f"{label}月份" in text:
+            return f"{fallback_year}-{month:02d}"
+    return fallback_month_id
+
+
+def apply_chat_edit_actions(entries: list[dict], actions_payload: dict) -> tuple[list[dict], dict]:
+    next_entries = [dict(entry) for entry in entries]
+    changed = 0
+    for action in actions_payload.get("actions", []):
+        if not isinstance(action, dict):
+            continue
+        action_type = clean_text(action.get("action"))
+        if action_type == "rename_category":
+            from_category = clean_text(action.get("fromCategory"))
+            to_category = clean_text(action.get("toCategory"))
+            if not from_category or not to_category:
+                continue
+            for entry in next_entries:
+                if clean_text(entry.get("category")) == from_category:
+                    entry["category"] = to_category
+                    entry["correctedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    changed += 1
+        elif action_type == "delete_entry":
+            index = to_int(action.get("index"))
+            if index is None or index < 1 or index > len(next_entries):
+                continue
+            next_entries.pop(index - 1)
+            changed += 1
+        elif action_type == "delete_matching":
+            filters = chat_edit_match_filters(action)
+            if not filters:
+                continue
+            kept_entries = []
+            for entry in next_entries:
+                if chat_edit_entry_matches(entry, filters):
+                    changed += 1
+                    continue
+                kept_entries.append(entry)
+            next_entries = kept_entries
+        elif action_type == "update_entry":
+            index = to_int(action.get("index"))
+            if index is None or index < 1 or index > len(next_entries):
+                continue
+            payload = {
+                "type": action.get("type", next_entries[index - 1].get("type")),
+                "name": action.get("name", next_entries[index - 1].get("name")),
+                "category": action.get("category", next_entries[index - 1].get("category")),
+                "amount": action.get("amount", abs(float(next_entries[index - 1].get("amount") or 0))),
+                "note": action.get("note", next_entries[index - 1].get("note")),
+            }
+            next_entries[index - 1] = corrected_entry(next_entries[index - 1], payload)
+            changed += 1
+    return next_entries, {"changed": changed}
+
+
+def chat_edit_match_filters(action: dict) -> dict:
+    filters = {
+        "type": clean_text(action.get("type")),
+        "category": clean_text(action.get("category")),
+        "nameContains": clean_text(action.get("nameContains")),
+        "noteContains": clean_text(action.get("noteContains")),
+    }
+    return {key: value for key, value in filters.items() if value}
+
+
+def chat_edit_entry_matches(entry: dict, filters: dict) -> bool:
+    entry_type = clean_text(entry.get("type"))
+    category = clean_text(entry.get("category"))
+    name = clean_text(entry.get("name"))
+    note = clean_text(entry.get("note"))
+    if filters.get("type") and entry_type != filters["type"]:
+        return False
+    if filters.get("category") and category != filters["category"]:
+        return False
+    if filters.get("nameContains") and filters["nameContains"] not in name:
+        return False
+    if filters.get("noteContains") and filters["noteContains"] not in note:
+        return False
+    return True
+
+
+def to_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def upsert_manual_entry(existing: dict | None, month_id: str, entry: dict) -> dict:
+    entries = list(existing.get("entries", [])) if existing else []
+    entries.append(entry)
+    return month_data_with_entries(existing, month_id, entries, existing.get("sourceFile") if existing else "手动录入")
+
+
+def month_data_with_entries(existing: dict | None, month_id: str, entries: list[dict], source_file: str) -> dict:
+    month_data = dict(existing) if existing else empty_month_data(month_id)
+    month_data.pop("isEmpty", None)
+    month_data["id"] = month_id
+    month_data["label"] = month_label(month_id)
+    month_data["title"] = month_data.get("title") or f"{month_label(month_id)}财务报表"
+    month_data["sourceFile"] = source_file or month_data.get("sourceFile") or "手动录入"
+    month_data["updatedAt"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    month_data["summary"] = summarize_entries(entries)
+    month_data["entries"] = entries
+    month_data["attachments"] = month_data.get("attachments", [])
+    month_data["notes"] = build_notes(entries)
+    month_data["actions"] = month_data.get("actions") or default_actions()
+    return month_data
+
+
+def upsert_ai_entries(existing: dict | None, month_id: str, next_entries: list[dict], source_label: str) -> dict:
+    existing_entries = list(existing.get("entries", [])) if existing else []
+    next_refs = {(entry.get("sourceKind"), entry.get("sourceRef")) for entry in next_entries if entry.get("sourceRef")}
+    if next_refs:
+        kept_entries = [
+            entry
+            for entry in existing_entries
+            if (entry.get("sourceKind"), entry.get("sourceRef")) not in next_refs
+        ]
+    else:
+        kept_entries = existing_entries
+    entries = kept_entries + next_entries
+    return month_data_with_entries(existing, month_id, entries, source_label)
+
+
+def empty_month_data(month_id: str) -> dict:
+    return {
+        "id": month_id,
+        "label": month_label(month_id),
+        "sourceFile": "手动录入",
+        "updatedAt": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "title": f"{month_label(month_id)}财务报表",
+        "summary": summarize_entries([]),
+        "entries": [],
+        "attachments": [],
+        "notes": [],
+        "actions": default_actions(),
+    }
+
+
+def summarize_entries(entries: list[dict]) -> dict:
+    gross_revenue = sum(item["amount"] for item in entries if item["type"] == "income")
+    refunds = sum(item["amount"] for item in entries if item["type"] == "refund")
+    adjustments = sum(item["amount"] for item in entries if item["type"] == "adjustment")
+    net_revenue = gross_revenue + refunds + adjustments
+    expenses = sum(item["amount"] for item in entries if item["type"] == "expense")
+    book_profit = gross_revenue - expenses
+    net_profit = net_revenue - expenses
+    return {
+        "grossRevenue": round(gross_revenue, 2),
+        "refunds": round(refunds, 2),
+        "netRevenue": round(net_revenue, 2),
+        "expenses": round(expenses, 2),
+        "bookProfit": round(book_profit, 2),
+        "netProfit": round(net_profit, 2),
+        "netProfitRate": net_profit / net_revenue if net_revenue else 0,
+    }
+
+
+def default_actions() -> list[dict]:
+    return [
+        {"title": "检查成本分类", "text": "导入或录入后优先查看工资、人力、佣金、投放和杂项是否归类准确。"},
+        {"title": "复盘利润率", "text": "每月比较净营收、总支出和实际净利润率的变化。"},
+        {"title": "保留原始凭证", "text": "上传文件和手动录入会保存在本地数据中，方便日后追溯。"},
+    ]
+
+
+def inspect_workbook_profile(workbook) -> dict:
+    sheets = []
+    for sheet in workbook.worksheets[:8]:
+        header_row = first_nonempty_row(sheet)
+        sheets.append(
+            {
+                "name": sheet.title,
+                "rows": sheet.max_row,
+                "columns": sheet.max_column,
+                "headers": header_row[:14],
+            }
+        )
+    return {"sheets": sheets}
+
+
+def first_nonempty_row(sheet) -> list[str]:
+    for row in range(1, min(sheet.max_row, 30) + 1):
+        values = [clean_text(sheet.cell(row, col).value) for col in range(1, min(sheet.max_column, 18) + 1)]
+        compact = [value for value in values if value]
+        if compact:
+            return compact
+    return []
+
+
+def extract_entries(sheet) -> list[dict]:
+    entries: list[dict] = []
+    section = None
+    for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, max_col=4, values_only=True):
+        first = clean_text(row[0])
+        second = row[1]
+        third = clean_text(row[2])
+        fourth = clean_text(row[3])
+
+        if first in {"项目", "收入项目"}:
+            section = "income"
+            continue
+        if first in {"支出项目", "成本项目", "费用项目"}:
+            section = "expense"
+            continue
+        if not first and not second and not third and not fourth:
+            continue
+        if section is None:
+            continue
+
+        amount = to_number(second)
+        if amount is None:
+            continue
+
+        if section == "expense":
+            entry_type = "expense"
+            category = normalize_cost_category(third or "未分类成本", first)
+        else:
+            entry_type = normalize_entry_type(third, amount)
+            category = normalize_income_category(third, first)
+
+        entries.append(
+            {
+                "name": first,
+                "amount": amount,
+                "type": entry_type,
+                "category": category,
+                "note": fourth,
+            }
+        )
+    return entries
+
+
+def extract_salary_entries(workbook) -> list[dict]:
+    entries: list[dict] = []
+    for sheet in workbook.worksheets:
+        header = find_salary_header(sheet)
+        if not header:
+            continue
+        row_index, columns = header
+        for row in range(row_index + 1, sheet.max_row + 1):
+            name = clean_text(sheet.cell(row, columns["姓名"]).value)
+            if not name:
+                continue
+            amount = to_number(sheet.cell(row, columns["应发合计"]).value)
+            if amount is None:
+                continue
+            department = clean_text(sheet.cell(row, columns.get("部门", 0)).value) if columns.get("部门") else ""
+            base_salary = to_number(sheet.cell(row, columns.get("基本工资", 0)).value) if columns.get("基本工资") else None
+            commission = to_number(sheet.cell(row, columns.get("提成", 0)).value) if columns.get("提成") else None
+            paid = to_number(sheet.cell(row, columns.get("实发工资", 0)).value) if columns.get("实发工资") else None
+            note_parts = []
+            if department:
+                note_parts.append(f"部门：{department}")
+            if base_salary is not None:
+                note_parts.append(f"基本工资：{format_amount(base_salary)}")
+            if commission:
+                note_parts.append(f"提成：{format_amount(commission)}")
+            if paid is not None:
+                note_parts.append(f"实发工资：{format_amount(paid)}")
+            entries.append(
+                {
+                    "name": f"{name}工资",
+                    "amount": round(amount, 2),
+                    "type": "expense",
+                    "category": "工资成本",
+                    "sourceKind": "salary",
+                    "note": "；".join(note_parts),
+                }
+            )
+        if entries:
+            return entries
+    return entries
+
+
+def find_salary_header(sheet):
+    required = {"姓名", "应发合计"}
+    aliases = {
+        "姓名": {"姓名", "*姓名"},
+        "部门": {"部门"},
+        "基本工资": {"基本工资", "底薪"},
+        "提成": {"提成", "绩效", "奖金"},
+        "应发合计": {"应发合计", "应发工资", "工资合计"},
+        "实发工资": {"实发工资", "实发合计"},
+    }
+    for row in range(1, min(sheet.max_row, 30) + 1):
+        columns = {}
+        for col in range(1, sheet.max_column + 1):
+            value = clean_text(sheet.cell(row, col).value)
+            for canonical, names in aliases.items():
+                if value in names:
+                    columns[canonical] = col
+        if required.issubset(columns):
+            return row, columns
+    return None
+
+
+def extract_enrollment_entries(workbook, month_id: str) -> list[dict]:
+    matched_entries: list[dict] = []
+    fallback_tables: list[list[dict]] = []
+    for sheet in workbook.worksheets:
+        header = find_enrollment_header(sheet)
+        if not header:
+            continue
+        row_index, columns = header
+        sheet_entries = []
+        for row in range(row_index + 1, sheet.max_row + 1):
+            name = clean_text(sheet.cell(row, columns["姓名"]).value)
+            amount = to_number(sheet.cell(row, columns["成交价格"]).value)
+            if not name or amount is None:
+                continue
+            payment_method = clean_text(sheet.cell(row, columns.get("付款方式", 0)).value) if columns.get("付款方式") else ""
+            payment_time = clean_text(sheet.cell(row, columns.get("付款时间", 0)).value) if columns.get("付款时间") else ""
+            course_note = clean_text(sheet.cell(row, columns.get("课程备注", 0)).value) if columns.get("课程备注") else ""
+            payment_note = clean_text(sheet.cell(row, columns.get("付款备注", 0)).value) if columns.get("付款备注") else ""
+            salesperson = clean_text(sheet.cell(row, columns.get("销售人员和销售微信号", 0)).value) if columns.get("销售人员和销售微信号") else ""
+            course_date = clean_text(sheet.cell(row, columns.get("上课时间", 0)).value) if columns.get("上课时间") else ""
+            combined_note = "；".join(
+                part
+                for part in [
+                    f"付款方式：{payment_method}" if payment_method else "",
+                    f"付款时间：{payment_time}" if payment_time else "",
+                    f"上课时间：{course_date}" if course_date else "",
+                    f"课程备注：{course_note}" if course_note else "",
+                    f"备注：{payment_note}" if payment_note else "",
+                    f"销售：{salesperson}" if salesperson else "",
+                ]
+                if part
+            )
+            text_for_refund = f"{course_note} {payment_note}".lower()
+            is_refund = "退款" in text_for_refund or "已退" in text_for_refund
+            entry = {
+                "name": f"{name}线下课",
+                "amount": -abs(amount) if is_refund else amount,
+                "type": "refund" if is_refund else "income",
+                "category": "退款" if is_refund else "线下课营收",
+                "sourceKind": "enrollment",
+                "note": combined_note,
+            }
+            sheet_entries.append(entry)
+            if row_matches_enrollment_month(month_id, payment_time, course_date, [course_note, payment_note, salesperson]):
+                matched_entries.append(entry)
+        if sheet_entries:
+            fallback_tables.append(sheet_entries)
+    if matched_entries:
+        return matched_entries
+    if len(fallback_tables) == 1:
+        return fallback_tables[0]
+    return []
+
+
+def find_enrollment_header(sheet):
+    aliases = {
+        "姓名": {"姓名", "名字"},
+        "成交价格": {"成交价格", "成交价格/定金", "金额", "成交金额"},
+        "付款方式": {"付款方式"},
+        "付款时间": {"付款时间", "报名时间", "付款"},
+        "上课时间": {"几号上课", "备注（几号来上课）"},
+        "销售人员和销售微信号": {"销售人员和销售微信号", "销售", "负责人"},
+    }
+    for row in range(1, min(sheet.max_row, 20) + 1):
+        columns = {}
+        remark_cols = []
+        for col in range(1, sheet.max_column + 1):
+            value = clean_text(sheet.cell(row, col).value)
+            if value == "备注":
+                remark_cols.append(col)
+            for canonical, names in aliases.items():
+                if header_matches(value, names):
+                    columns[canonical] = col
+        if "姓名" in columns and "成交价格" in columns:
+            if remark_cols:
+                columns["课程备注"] = remark_cols[0]
+            if len(remark_cols) > 1:
+                columns["付款备注"] = remark_cols[-1]
+            return row, columns
+    return None
+
+
+def extract_hint_entries(workbook, month_id: str, parse_hint: str) -> list[dict]:
+    mode = hint_mode(parse_hint)
+    if not mode:
+        return []
+    candidates: list[dict] = []
+    for sheet in workbook.worksheets:
+        header = find_generic_header(sheet)
+        if not header:
+            continue
+        row_index, columns = header
+        amount_col = choose_amount_column(columns, parse_hint)
+        name_col = choose_name_column(columns)
+        date_col = choose_date_column(columns)
+        note_cols = [col for label, col in columns.items() if label not in {"amount", "name", "date"}][:3]
+        if not amount_col:
+            continue
+        for row in range(row_index + 1, sheet.max_row + 1):
+            amount = to_number(sheet.cell(row, amount_col).value)
+            if amount is None:
+                continue
+            date_value = clean_text(sheet.cell(row, date_col).value) if date_col else ""
+            if date_col and extract_month_numbers(date_value) and int(month_id.split("-")[1]) not in extract_month_numbers(date_value):
+                continue
+            name = clean_text(sheet.cell(row, name_col).value) if name_col else clean_text(sheet.title)
+            notes = [clean_text(sheet.cell(row, col).value) for col in note_cols]
+            category = hint_category(parse_hint, mode)
+            candidates.append(
+                {
+                    "name": name or category,
+                    "amount": -abs(amount) if mode == "refund" else abs(amount),
+                    "type": mode,
+                    "category": "退款" if mode == "refund" else category,
+                    "sourceKind": "hint",
+                    "note": "；".join(note for note in notes if note),
+                }
+            )
+    return candidates
+
+
+def extract_ai_entries(workbook, month_id: str, parse_hint: str) -> list[dict]:
+    if gemini_api_key():
+        return extract_gemini_workbook_entries(workbook, month_id, parse_hint)
+    key = openai_api_key()
+    if not key:
+        return []
+
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "workbook": workbook_sample(workbook),
+        "allowedCategories": [
+            "线下课营收",
+            "课程营收",
+            "企业培训",
+            "工资成本",
+            "社保成本",
+            "佣金支付",
+            "投放费用",
+            "报销及杂项",
+            "办公固定成本",
+            "技术/录播费用",
+            "退款",
+            "调整",
+            "未分类成本",
+        ],
+    }
+    prompt = (
+        "你是财务表格解析助手。请根据工作簿的表头和样例行，提取可以入账到财务看板的明细。"
+        "只返回 JSON，格式为 {\"entries\":[...]}。每条明细字段：name, amount, type, category, note。"
+        "type 只能是 income、expense、refund、adjustment。income/expense/adjustment 的 amount 用正数，refund 用负数。"
+        "需要自动抓取看板所需数据，包括收入、退款、支出、工资成本、佣金、投放、报销杂项、办公固定成本等。"
+        "优先只提取目标月份相关行；如果整张表明显就是目标月份但没有日期列，可以保留。"
+        "不要编造数据；不要重复提取合计行和明细行，如果存在明细，优先用明细。"
+        "成本分类尽量归到工资成本、佣金支付、投放费用、报销及杂项、办公固定成本等可读类别。"
+    )
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise AiRecognitionError(redact_secrets(f"AI识别服务返回 {exc.code}：{detail}")[:500]) from exc
+    except Exception as exc:
+        raise AiRecognitionError(redact_secrets(f"AI识别服务调用失败：{exc}")[:500]) from exc
+
+    try:
+        content = raw["choices"][0]["message"]["content"]
+        result = parse_json_object(content)
+    except Exception as exc:
+        raise AiRecognitionError("AI识别结果不是可读取的 JSON。") from exc
+    return normalize_ai_entries(result)
+
+
+def extract_ai_image_entries(path: Path, month_id: str, parse_hint: str) -> list[dict]:
+    if gemini_api_key():
+        return extract_gemini_image_entries(path, month_id, parse_hint)
+    key = openai_api_key()
+    if not key:
+        return []
+
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "allowedCategories": [
+            "线下课营收",
+            "课程营收",
+            "企业培训",
+            "工资成本",
+            "社保成本",
+            "佣金支付",
+            "投放费用",
+            "报销及杂项",
+            "办公固定成本",
+            "技术/录播费用",
+            "退款",
+            "调整",
+            "未分类成本",
+        ],
+    }
+    prompt = (
+        "你是财务截图识别助手。请阅读图片中的表格、聊天截图、收款截图或报销截图，"
+        "提取可以入账到财务看板的明细。只返回 JSON，格式为 {\"entries\":[...]}。"
+        "每条明细字段：name, amount, type, category, note。type 只能是 income、expense、refund、adjustment。"
+        "income/expense/adjustment 的 amount 用正数，refund 用负数。"
+        "不要编造看不清的内容；不要重复提取合计行和明细行，如果存在明细，优先用明细。"
+        "优先只提取目标月份相关行；如果截图明显就是目标月份但没有日期，可以保留。"
+        "成本分类尽量归到工资成本、佣金支付、投放费用、报销及杂项、办公固定成本、技术/录播费用等类别。"
+        "备注里保留付款方式、日期、销售、截图中可核对的关键信息。"
+    )
+    user_text = (
+        "请识别这张图片并生成财务明细。"
+        f"\n上下文：{json.dumps(context, ensure_ascii=False)}"
+    )
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_text},
+                    {"type": "image_url", "image_url": {"url": image_data_url(path)}},
+                ],
+            },
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise AiRecognitionError(redact_secrets(f"AI截图识别服务返回 {exc.code}：{detail}")[:500]) from exc
+    except Exception as exc:
+        raise AiRecognitionError(redact_secrets(f"AI截图识别服务调用失败：{exc}")[:500]) from exc
+
+    try:
+        content = raw["choices"][0]["message"]["content"]
+        result = parse_json_object(content)
+    except Exception as exc:
+        raise AiRecognitionError("AI截图识别结果不是可读取的 JSON。") from exc
+    return normalize_ai_entries(result, "ai-image")
+
+
+def extract_ai_text_entries(text: str, month_id: str, parse_hint: str) -> list[dict]:
+    if gemini_api_key():
+        return extract_gemini_text_entries(text, month_id, parse_hint)
+    key = openai_api_key()
+    if not key:
+        return []
+
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "text": text,
+        "allowedCategories": [
+            "线下课营收",
+            "课程营收",
+            "企业培训",
+            "工资成本",
+            "社保成本",
+            "佣金支付",
+            "投放费用",
+            "报销及杂项",
+            "办公固定成本",
+            "技术/录播费用",
+            "退款",
+            "调整",
+            "未分类成本",
+        ],
+    }
+    prompt = (
+        "你是财务文字录入助手。请把用户输入的自然语言、聊天记录或粘贴的账目内容，"
+        "转换成可以入账到财务看板的结构化明细。只返回 JSON，格式为 {\"entries\":[...]}。"
+        "每条明细字段：name, amount, type, category, note。type 只能是 income、expense、refund、adjustment。"
+        "income/expense/adjustment 的 amount 用正数，refund 用负数。"
+        "不要编造金额；没有明确金额的内容不要生成明细。"
+        "如果一句话里有多笔收入、支出或退款，请拆成多条。"
+        "成本分类尽量归到工资成本、佣金支付、投放费用、报销及杂项、办公固定成本、技术/录播费用等类别。"
+    )
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise AiRecognitionError(redact_secrets(f"AI文字识别服务返回 {exc.code}：{detail}")[:500]) from exc
+    except Exception as exc:
+        raise AiRecognitionError(redact_secrets(f"AI文字识别服务调用失败：{exc}")[:500]) from exc
+
+    try:
+        content = raw["choices"][0]["message"]["content"]
+        result = parse_json_object(content)
+    except Exception as exc:
+        raise AiRecognitionError("AI文字识别结果不是可读取的 JSON。") from exc
+    return normalize_ai_entries(result, "ai-text")
+
+
+def extract_gemini_workbook_entries(workbook, month_id: str, parse_hint: str) -> list[dict]:
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "workbook": workbook_sample(workbook),
+        "allowedCategories": allowed_categories(),
+    }
+    prompt = (
+        "你是财务表格解析助手。请根据工作簿的表头和样例行，提取可以入账到财务看板的明细。"
+        "只返回 JSON，格式为 {\"entries\":[...]}。每条明细字段：name, amount, type, category, note。"
+        "type 只能是 income、expense、refund、adjustment。income/expense/adjustment 的 amount 用正数，refund 用负数。"
+        "不要编造数据；不要重复提取合计行和明细行，如果存在明细，优先用明细。"
+        f"\n上下文：{json.dumps(context, ensure_ascii=False)}"
+    )
+    return normalize_ai_entries(call_gemini_json([{"text": prompt}]), "ai")
+
+
+def extract_gemini_image_entries(path: Path, month_id: str, parse_hint: str) -> list[dict]:
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "allowedCategories": allowed_categories(),
+    }
+    prompt = (
+        "你是财务截图识别助手。请阅读图片中的表格、聊天截图、收款截图或报销截图，"
+        "提取可以入账到财务看板的明细。只返回 JSON，格式为 {\"entries\":[...]}。"
+        "每条明细字段：name, amount, type, category, note。type 只能是 income、expense、refund、adjustment。"
+        "income/expense/adjustment 的 amount 用正数，refund 用负数。不要编造看不清的内容。"
+        f"\n上下文：{json.dumps(context, ensure_ascii=False)}"
+    )
+    return normalize_ai_entries(
+        call_gemini_json(
+            [
+                {"text": prompt},
+                {"inline_data": {"mime_type": image_mime_type(path), "data": base64.b64encode(path.read_bytes()).decode("ascii")}},
+            ]
+        ),
+        "ai-image",
+    )
+
+
+def extract_gemini_text_entries(text: str, month_id: str, parse_hint: str) -> list[dict]:
+    context = {
+        "monthId": month_id,
+        "monthLabel": month_label(month_id),
+        "userHint": parse_hint,
+        "text": text,
+        "allowedCategories": allowed_categories(),
+    }
+    prompt = (
+        "你是财务文字录入助手。请把用户输入的自然语言、聊天记录或粘贴的账目内容，"
+        "转换成可以入账到财务看板的结构化明细。只返回 JSON，格式为 {\"entries\":[...]}。"
+        "每条明细字段：name, amount, type, category, note。type 只能是 income、expense、refund、adjustment。"
+        "income/expense/adjustment 的 amount 用正数，refund 用负数。没有明确金额的内容不要生成明细。"
+        f"\n上下文：{json.dumps(context, ensure_ascii=False)}"
+    )
+    return normalize_ai_entries(call_gemini_json([{"text": prompt}]), "ai-text")
+
+
+def call_gemini_json(parts: list[dict]) -> dict:
+    key = gemini_api_key()
+    if not key:
+        return {"entries": []}
+    model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+    payload = {
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "temperature": 0,
+            "responseMimeType": "application/json",
+        },
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise AiRecognitionError(redact_secrets(f"Gemini识别服务返回 {exc.code}：{detail}")[:500]) from exc
+    except Exception as exc:
+        raise AiRecognitionError(redact_secrets(f"Gemini识别服务调用失败：{exc}")[:500]) from exc
+    try:
+        content = "".join(part.get("text", "") for part in raw["candidates"][0]["content"]["parts"])
+        return parse_json_object(content)
+    except Exception as exc:
+        raise AiRecognitionError("Gemini识别结果不是可读取的 JSON。") from exc
+
+
+def call_openai_json(prompt: str) -> dict:
+    key = openai_api_key()
+    if not key:
+        return {}
+    payload = {
+        "model": os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            raw = json.loads(response.read().decode("utf-8"))
+            return parse_json_object(raw["choices"][0]["message"]["content"])
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise AiRecognitionError(redact_secrets(f"OpenAI修改服务返回 {exc.code}：{detail}")[:500]) from exc
+    except Exception as exc:
+        raise AiRecognitionError(redact_secrets(f"OpenAI修改服务调用失败：{exc}")[:500]) from exc
+
+
+def allowed_categories() -> list[str]:
+    return [
+        "线下课营收",
+        "课程营收",
+        "企业培训",
+        "工资成本",
+        "社保成本",
+        "佣金支付",
+        "投放费用",
+        "报销及杂项",
+        "办公固定成本",
+        "技术/录播费用",
+        "退款",
+        "调整",
+        "未分类成本",
+    ]
+
+
+def image_data_url(path: Path) -> str:
+    mime_type = image_mime_type(path)
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def image_mime_type(path: Path) -> str:
+    return mimetypes.guess_type(path.name)[0] or "image/png"
+
+
+def text_source_ref(month_id: str, text: str) -> str:
+    digest = hashlib.sha1(f"{month_id}\n{text}".encode("utf-8")).hexdigest()[:16]
+    return f"text-{digest}"
+
+
+def workbook_sample(workbook) -> dict:
+    sheets = []
+    for sheet in workbook.worksheets[:8]:
+        rows = []
+        for row in range(1, min(sheet.max_row, 35) + 1):
+            values = [safe_cell_value(sheet.cell(row, col).value) for col in range(1, min(sheet.max_column, 16) + 1)]
+            if any(value not in {"", None} for value in values):
+                rows.append(values)
+            if len(rows) >= 24:
+                break
+        sheets.append(
+            {
+                "name": sheet.title,
+                "rows": sheet.max_row,
+                "columns": sheet.max_column,
+                "sampleRows": rows,
+            }
+        )
+    return {"sheets": sheets}
+
+
+def safe_cell_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, (int, float)):
+        return value
+    text = clean_text(value)
+    return text[:120]
+
+
+def parse_json_object(content: str) -> dict:
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    return json.loads(text)
+
+
+def normalize_ai_entries(result: dict, source_kind: str = "ai") -> list[dict]:
+    entries = []
+    if not isinstance(result, dict):
+        return entries
+    for item in result.get("entries", []):
+        if not isinstance(item, dict):
+            continue
+        entry_type = clean_text(item.get("type"))
+        if entry_type not in {"income", "expense", "refund", "adjustment"}:
+            continue
+        amount = to_number(item.get("amount"))
+        if amount is None or amount == 0:
+            continue
+        category = clean_text(item.get("category")) or ("退款" if entry_type == "refund" else "未分类成本")
+        if entry_type == "expense":
+            category = normalize_cost_category(category, clean_text(item.get("name")))
+            amount = abs(amount)
+        elif entry_type == "refund":
+            category = "退款"
+            amount = -abs(amount)
+        else:
+            amount = abs(amount)
+        entries.append(
+            {
+                "name": clean_text(item.get("name")) or category,
+                "amount": round(amount, 2),
+                "type": entry_type,
+                "category": category,
+                "sourceKind": source_kind,
+                "note": clean_text(item.get("note")),
+            }
+        )
+    return entries
+
+
+def find_generic_header(sheet):
+    for row in range(1, min(sheet.max_row, 25) + 1):
+        columns = {}
+        for col in range(1, sheet.max_column + 1):
+            value = clean_text(sheet.cell(row, col).value)
+            if not value:
+                continue
+            normalized = normalize_header(value)
+            if any(key in normalized for key in ["金额", "价格", "合计", "工资", "费用", "成本"]):
+                columns.setdefault("amount", col)
+                columns[value] = col
+            elif any(key in normalized for key in ["姓名", "名字", "名称", "项目"]):
+                columns.setdefault("name", col)
+                columns[value] = col
+            elif any(key in normalized for key in ["日期", "时间"]):
+                columns.setdefault("date", col)
+                columns[value] = col
+            else:
+                columns[value] = col
+        if "amount" in columns and ("name" in columns or len(columns) >= 3):
+            return row, columns
+    return None
+
+
+def choose_amount_column(columns: dict, parse_hint: str):
+    normalized_hint = normalize_header(parse_hint)
+    for label, col in columns.items():
+        if label in {"amount", "name", "date"}:
+            continue
+        if normalize_header(label) and normalize_header(label) in normalized_hint:
+            return col
+    return columns.get("amount")
+
+
+def choose_name_column(columns: dict):
+    return columns.get("name")
+
+
+def choose_date_column(columns: dict):
+    return columns.get("date")
+
+
+def hint_mode(parse_hint: str) -> str:
+    if any(word in parse_hint for word in ["退款", "退费"]):
+        return "refund"
+    if any(word in parse_hint for word in ["收入", "营收", "成交", "付款", "销售"]):
+        return "income"
+    if any(word in parse_hint for word in ["工资", "成本", "支出", "费用", "报销"]):
+        return "expense"
+    return ""
+
+
+def hint_category(parse_hint: str, mode: str) -> str:
+    if "工资" in parse_hint:
+        return "工资成本"
+    if "佣金" in parse_hint:
+        return "佣金支付"
+    if "投放" in parse_hint:
+        return "投放费用"
+    if "报销" in parse_hint or "杂项" in parse_hint:
+        return "报销及杂项"
+    if "成交" in parse_hint or "学员" in parse_hint or "线下课" in parse_hint:
+        return "线下课营收"
+    return "收入" if mode == "income" else "费用"
+
+
+def header_matches(value: str, aliases: set[str]) -> bool:
+    normalized = normalize_header(value)
+    return any(normalized == normalize_header(alias) or normalize_header(alias) in normalized for alias in aliases)
+
+
+def normalize_header(value: str) -> str:
+    return re.sub(r"\s+", "", value).replace("、", "").replace("/", "")
+
+
+def row_matches_enrollment_month(month_id: str, payment_time: str, course_date: str, note_values: list[str]) -> bool:
+    target_month = int(month_id.split("-")[1])
+    payment_months = extract_month_numbers(clean_text(payment_time))
+    if payment_months:
+        return target_month in payment_months
+    course_months = extract_month_numbers(clean_text(course_date))
+    if course_months:
+        return target_month in course_months
+
+    haystack = " ".join(clean_text(value) for value in note_values if clean_text(value))
+    if not haystack:
+        return False
+    if contains_chinese_month(haystack, target_month):
+        return True
+    return any(month == target_month for month in extract_month_numbers(haystack))
+
+
+def contains_chinese_month(text: str, month: int) -> bool:
+    chinese = {
+        1: "一",
+        2: "二",
+        3: "三",
+        4: "四",
+        5: "五",
+        6: "六",
+        7: "七",
+        8: "八",
+        9: "九",
+        10: "十",
+        11: "十一",
+        12: "十二",
+    }
+    return f"{month}月" in text or f"{chinese[month]}月" in text
+
+
+def extract_month_numbers(text: str) -> list[int]:
+    months: list[int] = []
+    numeric_month = excel_serial_month(text)
+    if numeric_month:
+        months.append(numeric_month)
+    for match in re.finditer(r"(?:20)?\d{2}[./-](1[0-2]|0?[1-9])(?:[./-]\d{1,2})?", text):
+        months.append(int(match.group(1)))
+    for match in re.finditer(r"(?<!\d)(1[0-2]|0?[1-9])[./-]\d{1,2}(?!\d)", text):
+        months.append(int(match.group(1)))
+    return months
+
+
+def excel_serial_month(value: str) -> int | None:
+    text = clean_text(value)
+    if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return None
+    serial = float(text)
+    if serial < 30000:
+        return None
+    try:
+        return from_excel(serial).month
+    except Exception:
+        return None
+
+
+def merge_existing_entries(existing: dict | None, entries: list[dict], parsed_kind: str) -> list[dict]:
+    if not existing:
+        return entries
+    existing_entries = existing.get("entries", [])
+    if parsed_kind == "detail":
+        kept = [entry for entry in existing_entries if entry.get("sourceKind") == "manual"]
+    elif parsed_kind == "salary":
+        kept = [
+            entry
+            for entry in existing_entries
+            if not (entry.get("sourceKind") == "salary" or (entry.get("category") == "工资成本" and str(entry.get("name", "")).endswith("工资")))
+        ]
+    elif parsed_kind == "enrollment":
+        kept = [
+            entry
+            for entry in existing_entries
+            if not (entry.get("sourceKind") == "enrollment" or entry.get("category") in {"线下课营收"})
+        ]
+    elif parsed_kind == "ai":
+        kept = [entry for entry in existing_entries if entry.get("sourceKind") != "ai"]
+    else:
+        kept = existing_entries
+    return kept + entries
+
+
+def normalize_entry_type(raw_category: str, amount: float) -> str:
+    if "退款" in raw_category or amount < 0:
+        return "refund"
+    if "调整" in raw_category:
+        return "adjustment"
+    return "income"
+
+
+def normalize_income_category(raw_category: str, name: str) -> str:
+    text = f"{raw_category} {name}"
+    if "培训" in text or "企业" in text:
+        return "企业培训"
+    if "退款" in text:
+        return "退款"
+    if "调整" in text:
+        return "调整"
+    if raw_category and raw_category != "营收":
+        return raw_category
+    return "课程营收"
+
+
+def normalize_cost_category(raw_category: str, name: str) -> str:
+    text = f"{raw_category} {name}"
+    rules = [
+        ("工资成本", ["工资", "薪资", "薪酬"]),
+        ("社保成本", ["社保", "公积金"]),
+        ("佣金支付", ["佣金", "分佣"]),
+        ("投放费用", ["投放", "千川", "广告", "视频号"]),
+        ("报销及杂项", ["报销", "杂项", "差旅", "餐", "办公用品"]),
+        ("办公固定成本", ["房租", "网", "电", "手机", "物业"]),
+        ("技术/录播费用", ["录播", "技术", "软件", "系统"]),
+    ]
+    for category, keywords in rules:
+        if any(keyword in text for keyword in keywords):
+            return category
+    return raw_category or "未分类成本"
+
+
+def build_notes(entries: list[dict]) -> list[dict]:
+    expense_categories = sorted({entry["category"] for entry in entries if entry["type"] == "expense"})
+    notes = [
+        {"title": "数据来源", "text": "本月数据由上传表格解析和手动录入共同生成。" if any(entry.get("sourceKind") == "manual" for entry in entries) else "本月数据由上传表格自动解析生成。"},
+        {"title": "成本分类", "text": "已识别：" + "、".join(expense_categories) if expense_categories else "暂无成本分类。"},
+        {"title": "口径提示", "text": "净营收 = 收入 + 退款/调整；实际净利润 = 净营收 - 总支出。"},
+    ]
+    if any(str(entry.get("sourceKind", "")).startswith("ai") for entry in entries):
+        notes.insert(1, {"title": "AI辅助识别", "text": "本月使用大模型进行了辅助解析，请重点核对金额、月份和分类。"})
+    return notes
+
+
+def update_manifest(month_path: str) -> None:
+    if MANIFEST_PATH.exists():
+        manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    else:
+        manifest = {"months": []}
+    months = set(manifest.get("months", []))
+    months.add(month_path)
+    manifest["months"] = sorted(months, reverse=True)
+    MANIFEST_PATH.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    sync_embedded_data(manifest)
+
+
+def sync_embedded_data(manifest: dict | None = None) -> None:
+    if manifest is None:
+        if not MANIFEST_PATH.exists():
+            manifest = {"months": []}
+        else:
+            manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    loaded_months = []
+    for month_path in manifest.get("months", []):
+        path = ROOT / month_path
+        if path.exists():
+            loaded_months.append(json.loads(path.read_text(encoding="utf-8")))
+    payload = json.dumps({"manifest": manifest, "months": loaded_months}, ensure_ascii=False, indent=2)
+    escaped_payload = payload.replace("<", "\\u003c")
+    EMBEDDED_DATA_PATH.write_text(
+        f"window.__FINANCE_DASHBOARD_DATA__ = {escaped_payload};\n",
+        encoding="utf-8",
+    )
+
+
+def load_existing_month(month_id: str) -> dict | None:
+    path = MONTHS_DIR / f"{month_id}.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_local_env() -> None:
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
+    if not ENV_PATH.exists():
+        return
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if not text or text.startswith("#") or "=" not in text:
+            continue
+        key, value = text.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def openai_api_key() -> str:
+    load_local_env()
+    return os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+def gemini_api_key() -> str:
+    load_local_env()
+    return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+def ai_api_available() -> bool:
+    return bool(gemini_api_key() or openai_api_key())
+
+
+def redact_secrets(text: str) -> str:
+    text = re.sub(r"sk-[A-Za-z0-9_\-]+", "sk-***", text)
+    return re.sub(r"AIza[0-9A-Za-z_\-]+", "AIza***", text)
+
+
+def merge_note(notes: list[dict], next_note: dict) -> list[dict]:
+    filtered = [note for note in notes if note.get("title") != next_note["title"]]
+    return [next_note, *filtered]
+
+
+def upload_relative_path(path: Path) -> str:
+    return path.resolve().relative_to(ROOT).as_posix()
+
+
+def read_cell(sheet, cell: str) -> str:
+    if sheet is None:
+        return ""
+    return clean_text(sheet[cell].value)
+
+
+def clean_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def to_number(value) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).replace(",", "").replace("¥", "").replace("￥", "").strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def format_amount(value: float) -> str:
+    if float(value).is_integer():
+        return f"{int(value):,}"
+    return f"{value:,.2f}"
+
+
+def sanitize_filename(filename: str) -> str:
+    name = Path(filename).name
+    return re.sub(r"[^0-9A-Za-z._\-\u4e00-\u9fff]+", "_", name)
+
+
+def month_label(month_id: str) -> str:
+    year, month = month_id.split("-")
+    return f"{year}年{int(month)}月"
+
+
+if __name__ == "__main__":
+    mimetypes.add_type("text/javascript; charset=utf-8", ".js")
+    sync_embedded_data()
+    server = ThreadingHTTPServer(("127.0.0.1", 5173), FinanceHandler)
+    print("财务驾驶舱已启动：http://127.0.0.1:5173/")
+    server.serve_forever()

@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.deps/
+node_modules/
+dist/
+*.db
+xhs-media/
+.run/
+logs/

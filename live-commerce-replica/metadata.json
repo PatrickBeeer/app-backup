@@ -1,0 +1,6 @@
+{
+  "name": "镜刻 · 真人带货视频复刻工作台",
+  "description": "上传真人带货参考视频，FFmpeg 自动分析镜头与语音段落，复刻节奏并替换为新商品口播，逐段生成 720p 视频单元后拼接成片。素材上传经 app-manager 走腾讯 COS，视频生成调用智算谷（CPRT）多模态模型。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

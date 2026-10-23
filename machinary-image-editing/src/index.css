@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-[#f0f2f5] text-gray-900 antialiased;
+  }
+}
+
+.glass-panel {
+  @apply bg-white/60 backdrop-blur-md border border-white/40 shadow-xl rounded-[2rem];
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}

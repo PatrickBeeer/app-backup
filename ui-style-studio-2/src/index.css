@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    color: #0f172a;
+    background: #f8fafc;
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+}
+
+.bg-vibrant-lime {
+  background:
+    radial-gradient(48rem 24rem at 10% 15%, rgba(190, 242, 100, 0.24), transparent 62%),
+    radial-gradient(42rem 28rem at 95% 85%, rgba(163, 230, 53, 0.16), transparent 65%),
+    #ffffff;
+}
+
+.mesh-gradient-luxury {
+  background:
+    radial-gradient(36rem 24rem at 12% 16%, rgba(224, 231, 255, 0.85), transparent 68%),
+    radial-gradient(34rem 24rem at 82% 12%, rgba(250, 232, 255, 0.72), transparent 64%),
+    radial-gradient(30rem 22rem at 48% 88%, rgba(219, 234, 254, 0.78), transparent 66%),
+    linear-gradient(150deg, #f0f2f5, #f7f8fb 40%, #eef2ff 100%);
+}
+
+.mesh-gradient-maternity {
+  background:
+    radial-gradient(35rem 24rem at 15% 20%, rgba(239, 246, 255, 0.9), transparent 66%),
+    radial-gradient(33rem 20rem at 82% 18%, rgba(245, 243, 255, 0.8), transparent 62%),
+    radial-gradient(30rem 24rem at 50% 92%, rgba(255, 241, 242, 0.82), transparent 70%),
+    linear-gradient(160deg, #f8fafc, #f4f5ff 45%, #fff7fb 100%);
+}
+
+.mesh-gradient-cyber {
+  background:
+    radial-gradient(24rem 18rem at 8% 12%, rgba(16, 185, 129, 0.12), transparent 70%),
+    radial-gradient(28rem 20rem at 90% 84%, rgba(16, 185, 129, 0.08), transparent 72%),
+    #020504;
+}
+
+.tech-grid {
+  background-image:
+    linear-gradient(rgba(16, 185, 129, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 185, 129, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+}
+
+@keyframes stack-float {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+.floating-discs {
+  animation: stack-float 6s ease-in-out infinite;
+}
+
+@keyframes scanline-move {
+  from {
+    transform: translateY(-100%);
+  }
+
+  to {
+    transform: translateY(100%);
+  }
+}
+
+.scanline {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.scanline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 18%;
+  background: linear-gradient(to bottom, rgba(16, 185, 129, 0), rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0));
+  animation: scanline-move 4.5s linear infinite;
+}
+
+@keyframes hud-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.22), 0 0 24px rgba(16, 185, 129, 0.12);
+  }
+
+  50% {
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.35), 0 0 34px rgba(16, 185, 129, 0.18);
+  }
+}
+
+.hud-glow {
+  animation: hud-pulse 2.2s ease-in-out infinite;
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: rgba(100, 116, 139, 0.42);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(71, 85, 105, 0.58);
+}

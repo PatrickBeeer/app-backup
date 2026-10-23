@@ -1,0 +1,6 @@
+{
+  "name": "VisionCanvas 一键复刻",
+  "description": "Hosted standalone app for recreating product campaign visuals from reference images and product photos, with local text refinement support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

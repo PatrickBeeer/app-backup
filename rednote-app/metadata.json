@@ -1,0 +1,6 @@
+{
+  "name": "爆款拆解室",
+  "description": "粘贴公开小红书笔记链接，AI 拆解爆款原因、用户痛点与评论区需求，并复刻原创标题、正文与封面。Hosted standalone app routed through the UnityShop app-manager.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

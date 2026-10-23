@@ -1,0 +1,10 @@
+{
+  "name": "Seedance视频复刻",
+  "description": "基于 CPRT 多模态视频模型的动作复刻工作台：上传参考视频与 1-3 张参考图片，复刻人物动作并替换人物形象。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "video-generation",
+    "multimodal-reference",
+    "real-person-mode"
+  ]
+}
